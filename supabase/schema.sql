@@ -20,3 +20,4 @@ create policy "Permitir acceso completo a la app DulceControl"
   for all
   using (true)
   with check (true);
+
