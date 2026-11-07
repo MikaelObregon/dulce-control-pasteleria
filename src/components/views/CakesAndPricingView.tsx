@@ -58,6 +58,7 @@ export const CakesAndPricingView: React.FC = () => {
     upsertVariant,
     deleteVariant,
     upsertRecipe,
+    deleteRecipe,
   } = useStore();
 
   const [selectedRecipeId, setSelectedRecipeId] = useState<string>(
@@ -116,8 +117,11 @@ export const CakesAndPricingView: React.FC = () => {
   const [vPackaging, setVPackaging] = useState<RecipePackagingLine[]>([]);
 
   const [isNewRecipeModalOpen, setIsNewRecipeModalOpen] = useState(false);
+  const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [newRecipeName, setNewRecipeName] = useState('');
   const [newRecipeEmoji, setNewRecipeEmoji] = useState('🍰');
+  const [newRecipeDescription, setNewRecipeDescription] = useState('');
+  const [newRecipeYieldLabel, setNewRecipeYieldLabel] = useState('');
 
   useEffect(() => {
     if (activeVariant) {
@@ -282,6 +286,9 @@ export const CakesAndPricingView: React.FC = () => {
   const handleSaveVariant = (e: React.FormEvent) => {
     e.preventDefault();
     if (!vName.trim()) return;
+    const existingVar = editingVariantId
+      ? activeRecipe.variants.find((v) => v.id === editingVariantId)
+      : undefined;
     const id = editingVariantId || `var-${Date.now()}`;
     const newVar: RecipeVariant = {
       id,
@@ -289,29 +296,108 @@ export const CakesAndPricingView: React.FC = () => {
       format: vFormat,
       servingsLabel: vServings.trim() || FORMAT_LABELS[vFormat].label,
       scaleFactor: Math.max(0.01, Number(vScale) || 1),
-      customIngredients: activeVariant.customIngredients,
+      customIngredients: existingVar ? existingVar.customIngredients : undefined,
       packagingItems: vPackaging.filter((p) => p.supplyId && p.quantity > 0),
       utilityPercent: Math.max(0, Number(vUtilityPct) || 0),
-      defaultMarkupPercent: desiredPercent,
-      manualSalePrice: activeVariant.manualSalePrice,
+      defaultMarkupPercent: existingVar ? existingVar.defaultMarkupPercent : desiredPercent,
+      manualSalePrice: existingVar ? existingVar.manualSalePrice : undefined,
     };
     upsertVariant(activeRecipe.id, newVar);
     setSelectedVariantId(id);
     setIsVariantModalOpen(false);
+    setSaveFeedback(
+      editingVariantId
+        ? `¡Tamaño "${newVar.name}" actualizado!`
+        : `¡Nuevo tamaño "${newVar.name}" agregado!`
+    );
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
+
+  const handleDuplicateVariant = (variant: RecipeVariant) => {
+    const newId = `var-${Date.now()}`;
+    const duplicated: RecipeVariant = {
+      ...variant,
+      id: newId,
+      name: `${variant.name} (Copia)`,
+      packagingItems: variant.packagingItems.map((p) => ({ ...p })),
+      customIngredients: variant.customIngredients
+        ? variant.customIngredients.map((c) => ({ ...c }))
+        : undefined,
+    };
+    upsertVariant(activeRecipe.id, duplicated);
+    setSelectedVariantId(newId);
+    setSaveFeedback(`¡Tamaño duplicado como "${duplicated.name}"!`);
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
+
+  const handleDeleteVariantConfirm = (variant: RecipeVariant) => {
+    if (activeRecipe.variants.length <= 1) {
+      window.alert('Cada torta debe tener al menos 1 tamaño activo.');
+      return;
+    }
+    if (
+      window.confirm(
+        `¿Seguro que deseas eliminar el tamaño "${variant.name}" de ${activeRecipe.name}?`
+      )
+    ) {
+      const remaining = activeRecipe.variants.filter((v) => v.id !== variant.id);
+      deleteVariant(activeRecipe.id, variant.id);
+      if (selectedVariantId === variant.id && remaining[0]) {
+        setSelectedVariantId(remaining[0].id);
+      }
+      setIsVariantModalOpen(false);
+      setSaveFeedback(`Tamaño "${variant.name}" eliminado.`);
+      setTimeout(() => setSaveFeedback(null), 3000);
+    }
+  };
+
+  const openRecipeModal = (recipeToEdit?: Recipe) => {
+    if (recipeToEdit) {
+      setEditingRecipeId(recipeToEdit.id);
+      setNewRecipeName(recipeToEdit.name);
+      setNewRecipeEmoji(recipeToEdit.emoji);
+      setNewRecipeDescription(recipeToEdit.description);
+      setNewRecipeYieldLabel(recipeToEdit.baseYieldLabel);
+    } else {
+      setEditingRecipeId(null);
+      setNewRecipeName('');
+      setNewRecipeEmoji('🍰');
+      setNewRecipeDescription('Receta artesanal personalizada');
+      setNewRecipeYieldLabel('Receta Base = 1 Torta Mediana (8 porciones)');
+    }
+    setIsNewRecipeModalOpen(true);
   };
 
   const handleCreateNewRecipe = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRecipeName.trim()) return;
+
+    if (editingRecipeId) {
+      const target = recipes.find((r) => r.id === editingRecipeId);
+      if (target) {
+        upsertRecipe({
+          ...target,
+          name: newRecipeName.trim(),
+          emoji: newRecipeEmoji || '🍰',
+          description: newRecipeDescription.trim() || target.description,
+          baseYieldLabel: newRecipeYieldLabel.trim() || target.baseYieldLabel,
+        });
+      }
+      setIsNewRecipeModalOpen(false);
+      setEditingRecipeId(null);
+      return;
+    }
+
     const newId = `recipe-${Date.now()}`;
     const defaultVarId = `var-${Date.now()}-med`;
     const newRecipe: Recipe = {
       id: newId,
       name: newRecipeName.trim(),
-      description: 'Receta artesanal personalizada',
+      description: newRecipeDescription.trim() || 'Receta artesanal personalizada',
       emoji: newRecipeEmoji || '🍰',
       accentColor: 'pink',
-      baseYieldLabel: 'Receta Base = 1 Torta Mediana (8 porciones)',
+      baseYieldLabel:
+        newRecipeYieldLabel.trim() || 'Receta Base = 1 Torta Mediana (8 porciones)',
       baseIngredients: ingredientSupplies.slice(0, 3).map((s) => ({
         supplyId: s.id,
         quantity: s.baseUnit === 'u' ? 3 : 200,
@@ -336,6 +422,25 @@ export const CakesAndPricingView: React.FC = () => {
     setSelectedVariantId(defaultVarId);
     setIsNewRecipeModalOpen(false);
     setNewRecipeName('');
+  };
+
+  const handleDeleteRecipeConfirm = (recipe: Recipe) => {
+    if (recipes.length <= 1) {
+      window.alert('Debes mantener al menos 1 torta en el catálogo.');
+      return;
+    }
+    if (
+      window.confirm(
+        `¿Seguro que deseas eliminar la torta "${recipe.name}" y todos sus tamaños?`
+      )
+    ) {
+      const remaining = recipes.filter((r) => r.id !== recipe.id);
+      deleteRecipe(recipe.id);
+      if (remaining[0]) {
+        handleSelectRecipe(remaining[0]);
+      }
+      setIsNewRecipeModalOpen(false);
+    }
   };
 
   return (
@@ -420,7 +525,15 @@ export const CakesAndPricingView: React.FC = () => {
         })}
 
         <button
-          onClick={() => setIsNewRecipeModalOpen(true)}
+          onClick={() => openRecipeModal(activeRecipe)}
+          className="flex items-center gap-1.5 px-3.5 py-3 rounded-3xl border-2 border-stone-200 bg-white text-stone-700 text-xs font-extrabold shrink-0 hover:border-pink-300 transition cursor-pointer"
+          title="Editar o eliminar esta torta"
+        >
+          <Edit3 className="w-3.5 h-3.5 text-pink-700" /> Editar Torta
+        </button>
+
+        <button
+          onClick={() => openRecipeModal(undefined)}
           className="flex items-center gap-1.5 px-4 py-3 rounded-3xl border-2 border-dashed border-pink-300 bg-pink-50/60 text-pink-800 text-xs font-extrabold shrink-0 hover:bg-pink-100 transition cursor-pointer"
         >
           <Plus className="w-4 h-4" /> + Otra Torta
@@ -428,17 +541,17 @@ export const CakesAndPricingView: React.FC = () => {
       </div>
 
       {/* 3. SELECTOR TÁCTIL DE TAMAÑO / FORMATO */}
-      <div className="bg-white rounded-3xl p-4 border border-stone-200/80 shadow-xs">
-        <div className="flex items-center justify-between mb-3">
+      <div className="bg-white rounded-3xl p-4 border border-stone-200/80 shadow-xs space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs font-extrabold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-pink-700" />
-            Tamaño de {activeRecipe.name}:
+            Tamaños de {activeRecipe.name} ({activeRecipe.variants.length}):
           </span>
           <button
             onClick={() => openEditVariantModal(undefined)}
-            className="inline-flex items-center gap-1 text-xs font-extrabold text-pink-700 bg-pink-50 hover:bg-pink-100 px-3 py-1 rounded-full transition cursor-pointer"
+            className="inline-flex items-center gap-1 text-xs font-extrabold text-white bg-pink-700 hover:bg-pink-800 px-3.5 py-1.5 rounded-full shadow-2xs transition cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" /> Agregar Tamaño
+            <Plus className="w-3.5 h-3.5" /> + Agregar Tamaño
           </button>
         </div>
 
@@ -449,61 +562,157 @@ export const CakesAndPricingView: React.FC = () => {
             const fmt = FORMAT_LABELS[variant.format];
 
             return (
-              <button
+              <div
                 key={variant.id}
                 onClick={() => setSelectedVariantId(variant.id)}
-                className={`min-w-[138px] sm:min-w-0 p-3 rounded-2xl border-2 text-left transition-all cursor-pointer shrink-0 ${
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedVariantId(variant.id);
+                }}
+                className={`min-w-[148px] sm:min-w-0 p-3 rounded-2xl border-2 text-left transition-all cursor-pointer shrink-0 flex flex-col justify-between ${
                   isSelected
                     ? 'bg-pink-700 text-white border-pink-700 shadow-md'
                     : 'bg-[#FDFBF7] text-stone-800 border-stone-200/90 hover:border-pink-300'
                 }`}
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-base">{fmt.icon}</span>
-                  {variant.manualSalePrice ? (
-                    <span
-                      className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                <div>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-base">{fmt.icon}</span>
+                    <div className="flex items-center gap-1">
+                      {variant.manualSalePrice ? (
+                        <span
+                          className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                            isSelected
+                              ? 'bg-amber-300 text-stone-950'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}
+                        >
+                          Fijo
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-[10px] font-bold ${
+                            isSelected ? 'text-pink-200' : 'text-stone-400'
+                          }`}
+                        >
+                          +{variant.defaultMarkupPercent}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <p
+                    className={`text-xs font-extrabold mt-1.5 truncate ${
+                      isSelected ? 'text-white' : 'text-stone-900'
+                    }`}
+                  >
+                    {variant.name}
+                  </p>
+                  <p
+                    className={`text-[10px] font-semibold truncate ${
+                      isSelected ? 'text-pink-200' : 'text-stone-400'
+                    }`}
+                  >
+                    {variant.servingsLabel}
+                  </p>
+                  <p
+                    className={`text-sm font-black mt-0.5 ${
+                      isSelected ? 'text-amber-200' : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatMoney(vBreak.effectiveSalePrice)}
+                  </p>
+                  <p
+                    className={`text-[10px] font-medium ${
+                      isSelected ? 'text-pink-100' : 'text-stone-500'
+                    }`}
+                  >
+                    Costo: {formatMoney(vBreak.totalProductionCost)}
+                  </p>
+                </div>
+
+                {/* Botones rápidos de Editar y Eliminar en cada tarjeta de tamaño */}
+                <div
+                  className={`flex items-center justify-end gap-1 mt-2 pt-1.5 border-t ${
+                    isSelected ? 'border-pink-500/50' : 'border-stone-200/70'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedVariantId(variant.id);
+                      openEditVariantModal(variant);
+                    }}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-extrabold transition cursor-pointer ${
+                      isSelected
+                        ? 'bg-white/20 hover:bg-white/30 text-white'
+                        : 'bg-stone-200/70 hover:bg-stone-300/80 text-stone-700'
+                    }`}
+                    title="Editar este tamaño"
+                  >
+                    <Edit3 className="w-3 h-3" /> Editar
+                  </button>
+                  {activeRecipe.variants.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteVariantConfirm(variant)}
+                      className={`p-1 rounded-lg transition cursor-pointer ${
                         isSelected
-                          ? 'bg-amber-300 text-stone-950'
-                          : 'bg-amber-100 text-amber-900'
+                          ? 'bg-white/15 hover:bg-red-500 text-pink-100 hover:text-white'
+                          : 'bg-stone-200/60 hover:bg-red-100 text-stone-500 hover:text-red-700'
                       }`}
+                      title="Eliminar este tamaño"
                     >
-                      Fijo
-                    </span>
-                  ) : (
-                    <span
-                      className={`text-[10px] font-bold ${
-                        isSelected ? 'text-pink-200' : 'text-stone-400'
-                      }`}
-                    >
-                      +{variant.defaultMarkupPercent}%
-                    </span>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                   )}
                 </div>
-                <p
-                  className={`text-xs font-extrabold mt-1.5 truncate ${
-                    isSelected ? 'text-white' : 'text-stone-900'
-                  }`}
-                >
-                  {variant.name}
-                </p>
-                <p
-                  className={`text-sm font-black mt-0.5 ${
-                    isSelected ? 'text-amber-200' : 'text-emerald-700'
-                  }`}
-                >
-                  {formatMoney(vBreak.effectiveSalePrice)}
-                </p>
-                <p
-                  className={`text-[10px] font-medium ${
-                    isSelected ? 'text-pink-100' : 'text-stone-500'
-                  }`}
-                >
-                  Costo: {formatMoney(vBreak.totalProductionCost)}
-                </p>
-              </button>
+              </div>
             );
           })}
+        </div>
+
+        {/* Barra de acciones directas del tamaño seleccionado */}
+        <div className="bg-stone-50 border border-stone-200/80 rounded-2xl p-2.5 flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-xs font-bold text-stone-700 pl-1">
+            Tamaño activo: <span className="font-extrabold text-pink-800">{activeVariant.name}</span>{' '}
+            <span className="text-stone-400">({activeVariant.servingsLabel})</span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => openEditVariantModal(activeVariant)}
+              className="inline-flex items-center gap-1 text-xs font-extrabold bg-white hover:bg-pink-50 text-stone-800 border border-stone-300 px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-pink-700" /> Editar Tamaño / Envases
+            </button>
+            <button
+              type="button"
+              onClick={() => openIngredientsEditor('variant_custom')}
+              className="inline-flex items-center gap-1 text-xs font-extrabold bg-white hover:bg-purple-50 text-stone-800 border border-stone-300 px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
+            >
+              <Sliders className="w-3.5 h-3.5 text-purple-700" /> Editar Gramos
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDuplicateVariant(activeVariant)}
+              className="inline-flex items-center gap-1 text-xs font-extrabold bg-white hover:bg-amber-50 text-stone-700 border border-stone-300 px-2.5 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
+              title="Crear una copia de este tamaño"
+            >
+              <Copy className="w-3.5 h-3.5 text-amber-700" /> Duplicar
+            </button>
+            {activeRecipe.variants.length > 1 && (
+              <button
+                type="button"
+                onClick={() => handleDeleteVariantConfirm(activeVariant)}
+                className="inline-flex items-center gap-1 text-xs font-extrabold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-xl transition cursor-pointer"
+                title="Eliminar este tamaño"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Eliminar
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1291,6 +1500,20 @@ export const CakesAndPricingView: React.FC = () => {
               </div>
 
               <div className="flex gap-2.5 pt-2">
+                {editingVariantId && activeRecipe.variants.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = activeRecipe.variants.find(
+                        (v) => v.id === editingVariantId
+                      );
+                      if (target) handleDeleteVariantConfirm(target);
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" /> Eliminar
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsVariantModalOpen(false)}
@@ -1310,12 +1533,14 @@ export const CakesAndPricingView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: New Recipe */}
+      {/* Modal: New / Edit Recipe */}
       {isNewRecipeModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-stone-100">
-              <h2 className="text-base font-bold text-stone-900">Agregar Nueva Torta</h2>
+              <h2 className="text-base font-bold text-stone-900">
+                {editingRecipeId ? 'Editar Torta / Producto' : 'Agregar Nueva Torta'}
+              </h2>
               <button
                 onClick={() => setIsNewRecipeModalOpen(false)}
                 className="p-1.5 text-stone-400 hover:text-stone-700"
@@ -1348,7 +1573,46 @@ export const CakesAndPricingView: React.FC = () => {
                   />
                 </div>
               </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  Descripción corta
+                </label>
+                <input
+                  type="text"
+                  value={newRecipeDescription}
+                  onChange={(e) => setNewRecipeDescription(e.target.value)}
+                  placeholder="Ej: Bizcochuelo húmedo con crema..."
+                  className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  Rendimiento de la Receta Base
+                </label>
+                <input
+                  type="text"
+                  value={newRecipeYieldLabel}
+                  onChange={(e) => setNewRecipeYieldLabel(e.target.value)}
+                  placeholder="Ej: Receta Base = 1 Torta Mediana (8 porciones)"
+                  className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-xs"
+                />
+              </div>
+
               <div className="flex gap-2.5 pt-2">
+                {editingRecipeId && recipes.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = recipes.find((r) => r.id === editingRecipeId);
+                      if (target) handleDeleteRecipeConfirm(target);
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" /> Eliminar Torta
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsNewRecipeModalOpen(false)}
@@ -1360,7 +1624,7 @@ export const CakesAndPricingView: React.FC = () => {
                   type="submit"
                   className="flex-1 py-2.5 rounded-xl bg-pink-700 text-white font-bold text-sm cursor-pointer"
                 >
-                  Crear Producto
+                  {editingRecipeId ? 'Guardar Cambios' : 'Crear Producto'}
                 </button>
               </div>
             </form>
