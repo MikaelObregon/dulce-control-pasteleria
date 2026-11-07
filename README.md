@@ -2,7 +2,11 @@
 
 Aplicación **Mobile-First (PWA)** diseñada para la administración integral de emprendimientos de pastelería artesanal (**Torta Tres Leches, Marquesa de Chocolate y Torta Volteada de Piña**, extensible a cualquier catálogo).
 
-Combina **cálculo reactivo de costos por gramo/ml/unidad**, **simulador de precios (Precio Sugerido vs. Precio Manual)**, **control de stock e indicadores de capacidad de producción**, **agenda de pedidos y alertas de deudas**, y **control de caja con separación matemática entre el Fondo Intocable de Reposición de Mercadería y tu Ganancia Neta Libre**.
+🌐 **App en Producción (Vercel):** [https://dulce-control-pasteleria.vercel.app](https://dulce-control-pasteleria.vercel.app)  
+🗄️ **Base de Datos en la Nube (Supabase):** Proyecto `dulce-control-pasteleria` (`tgbvbgktupiqmcskirzc` — Región Sudamérica `sa-east-1`)  
+📦 **Repositorio GitHub:** [https://github.com/MikaelObregon/dulce-control-pasteleria](https://github.com/MikaelObregon/dulce-control-pasteleria)
+
+Combina **cálculo reactivo de costos por gramo/ml/unidad**, **simulador de precios (Precio Sugerido vs. Precio Manual)**, **control de stock e indicadores de capacidad de producción**, **agenda de pedidos y alertas de deudores**, y **control de caja con separación matemática entre el Fondo Intocable de Reposición de Mercadería y tu Ganancia Neta Libre**.
 
 ---
 

@@ -11,9 +11,11 @@ export const SUPABASE_SETUP_SQL = `create table if not exists public.dulce_contr
   updated_at timestamptz not null default now()
 );
 alter table public.dulce_control_store enable row level security;
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on table public.dulce_control_store to anon, authenticated;
 drop policy if exists "Permitir acceso completo a la app DulceControl" on public.dulce_control_store;
 create policy "Permitir acceso completo a la app DulceControl"
-  on public.dulce_control_store for all using (true) with check (true);`;
+  on public.dulce_control_store for all to anon, authenticated using (true) with check (true);`;
 
 export function getSupabaseConfig(): SupabaseConnectionConfig | null {
   const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;

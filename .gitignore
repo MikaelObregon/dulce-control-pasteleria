@@ -10,7 +10,12 @@ tsconfig.tsbuildinfo
 # Environment variables
 .env
 .env.*
+.env*
 !.env.example
+
+# Vercel & Supabase CLI temp files
+.vercel
+supabase/.temp/
 
 # Editor & OS files
 .vscode/*
@@ -23,4 +28,3 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
-
