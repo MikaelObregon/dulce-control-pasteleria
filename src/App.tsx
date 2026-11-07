@@ -99,82 +99,105 @@ const MainShell: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-stone-900 flex flex-col">
       {/* Top Sticky Mobile Bar */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-stone-200/80 px-3.5 py-2.5">
-        <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-pink-600 via-rose-600 to-amber-600 text-white flex items-center justify-center font-black text-lg shadow-xs shrink-0">
-              🍰
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200/90 px-3.5 pb-3 safe-top-header shadow-2xs">
+        <div className="max-w-2xl mx-auto flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-pink-600 via-rose-600 to-amber-600 text-white flex items-center justify-center font-black text-lg shadow-xs shrink-0">
+                🍰
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-extrabold text-stone-900 truncate leading-tight">
+                  {settings.businessName}
+                </h1>
+                <p className="text-[11px] font-medium text-stone-500 truncate">
+                  Pastelería & Control de Caja
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-extrabold text-stone-900 truncate leading-tight">
-                {settings.businessName}
-              </h1>
-              <p className="text-[11px] text-stone-500 truncate">
-                Libre p/ gastar:{' '}
-                <strong className="text-emerald-700 font-extrabold">
-                  {formatMoney(Math.max(0, cashSummary.availableFreeProfit))}
-                </strong>{' '}
-                · Mercadería:{' '}
-                <strong className="text-amber-800 font-extrabold">
-                  {formatMoney(cashSummary.untouchableReplacementFund)}
-                </strong>
-              </p>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {debtCount > 0 && (
+                <button
+                  onClick={() => setActiveTab('hoy_caja')}
+                  className="bg-red-100 hover:bg-red-200 text-red-800 border border-red-300 text-[11px] font-extrabold px-2.5 py-1.5 rounded-full animate-pulse cursor-pointer"
+                  title="Clientes que retiraron con deuda pendiente"
+                >
+                  ⚠️ {debtCount} Deuda{debtCount > 1 ? 's' : ''}
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                  cloudStatus === 'synced'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : cloudStatus === 'syncing'
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : cloudStatus === 'error'
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : 'bg-stone-100 text-stone-600 border-stone-200'
+                }`}
+                title="Configurar Base de Datos en la Nube y Preferencias"
+              >
+                {cloudStatus === 'synced' ? (
+                  <>
+                    <Cloud className="w-3.5 h-3.5 text-emerald-600" /> Nube OK
+                  </>
+                ) : cloudStatus === 'syncing' ? (
+                  <>
+                    <RefreshCcw className="w-3.5 h-3.5 animate-spin" /> Sync...
+                  </>
+                ) : (
+                  <>
+                    <CloudOff className="w-3.5 h-3.5" /> Local
+                  </>
+                )}
+                <Settings className="w-3.5 h-3.5 ml-0.5" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {debtCount > 0 && (
-              <button
-                onClick={() => setActiveTab('hoy_caja')}
-                className="bg-red-100 hover:bg-red-200 text-red-800 border border-red-300 text-[11px] font-extrabold px-2.5 py-1 rounded-full animate-pulse cursor-pointer"
-                title="Clientes que retiraron con deuda pendiente"
-              >
-                ⚠️ {debtCount} Deuda{debtCount > 1 ? 's' : ''}
-              </button>
-            )}
-
+          {/* Resumen rápido de los 2 bolsillos bien visible debajo del título */}
+          <div className="grid grid-cols-2 gap-2 pt-0.5">
             <button
-              onClick={() => setIsSettingsOpen(true)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border transition cursor-pointer ${
-                cloudStatus === 'synced'
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                  : cloudStatus === 'syncing'
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : cloudStatus === 'error'
-                      ? 'bg-red-50 text-red-700 border-red-200'
-                      : 'bg-stone-100 text-stone-600 border-stone-200'
-              }`}
-              title="Configurar Base de Datos en la Nube y Preferencias"
+              type="button"
+              onClick={() => setActiveTab('hoy_caja')}
+              className="bg-emerald-50/90 border border-emerald-200/90 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-left cursor-pointer"
             >
-              {cloudStatus === 'synced' ? (
-                <>
-                  <Cloud className="w-3.5 h-3.5 text-emerald-600" /> Nube OK
-                </>
-              ) : cloudStatus === 'syncing' ? (
-                <>
-                  <RefreshCcw className="w-3.5 h-3.5 animate-spin" /> Sync...
-                </>
-              ) : (
-                <>
-                  <CloudOff className="w-3.5 h-3.5" /> Local
-                </>
-              )}
-              <Settings className="w-3.5 h-3.5 ml-0.5" />
+              <span className="text-[10px] font-bold uppercase text-emerald-800">
+                ✅ Libre p/ gastar
+              </span>
+              <strong className="text-xs font-black text-emerald-800">
+                {formatMoney(Math.max(0, cashSummary.availableFreeProfit))}
+              </strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('hoy_caja')}
+              className="bg-amber-50/90 border border-amber-200/90 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-left cursor-pointer"
+            >
+              <span className="text-[10px] font-bold uppercase text-amber-900">
+                🔒 Mercadería
+              </span>
+              <strong className="text-xs font-black text-amber-900">
+                {formatMoney(cashSummary.untouchableReplacementFund)}
+              </strong>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-2xl mx-auto px-3.5 pt-3.5 pb-24">
+      <main className="flex-1 w-full max-w-2xl mx-auto px-3.5 pt-4 pb-28">
         {activeTab === 'hoy_caja' && <TodayAndCashView />}
         {activeTab === 'tortas_precios' && <CakesAndPricingView />}
         {activeTab === 'insumos_compras' && <SuppliesAndShoppingView />}
       </main>
 
       {/* Bottom Ergonomic 3-Tab Bar */}
-      <nav className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200/90 shadow-lg">
-        <div className="max-w-2xl mx-auto grid grid-cols-3 gap-2 px-3 py-2">
+      <nav className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200/90 shadow-lg safe-bottom-nav">
+        <div className="max-w-2xl mx-auto grid grid-cols-3 gap-2 px-3 pt-2">
           <button
             onClick={() => {
               setActiveTab('hoy_caja');

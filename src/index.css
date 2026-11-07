@@ -21,3 +21,18 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Safe area spacing for mobile notches, status bars, and PWA standalone mode */
+.safe-top-header {
+  padding-top: max(1.25rem, calc(env(safe-area-inset-top, 0px) + 0.85rem));
+}
+
+@media (display-mode: standalone) {
+  .safe-top-header {
+    padding-top: max(2.4rem, calc(env(safe-area-inset-top, 0px) + 1rem));
+  }
+}
+
+.safe-bottom-nav {
+  padding-bottom: max(0.65rem, calc(env(safe-area-inset-bottom, 0px) + 0.45rem));
+}
