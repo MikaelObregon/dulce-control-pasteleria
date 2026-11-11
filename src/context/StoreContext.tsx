@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import {
+  DEFAULT_SPECIALTIES_BY_RECIPE,
   INITIAL_CASH_MOVEMENTS,
   INITIAL_ORDERS,
   INITIAL_RECIPES,
@@ -35,6 +36,7 @@ import {
   OrderStatus,
   Recipe,
   RecipeIngredientLine,
+  RecipeSpecialty,
   RecipeVariant,
   Supply,
 } from '../types/domain';
@@ -92,11 +94,20 @@ interface StoreContextValue {
   ) => void;
   upsertVariant: (recipeId: string, variant: RecipeVariant) => void;
   deleteVariant: (recipeId: string, variantId: string) => void;
+  upsertSpecialty: (recipeId: string, specialty: RecipeSpecialty) => void;
+  deleteSpecialty: (recipeId: string, specialtyId: string) => void;
+  adjustVariantReadyStock: (
+    recipeId: string,
+    variantId: string,
+    specialtyId: string,
+    newReadyQty: number
+  ) => void;
   applyPricingToVariant: (
     recipeId: string,
     variantId: string,
     markupPercent: number,
-    manualSalePrice?: number
+    manualSalePrice?: number,
+    specialtyId?: string
   ) => void;
 
   // Paso 4: Agenda de Pedidos, Clientes y Deudas
@@ -126,6 +137,28 @@ interface StoreContextValue {
 
 const StoreContext = createContext<StoreContextValue | undefined>(undefined);
 
+function ensureRecipesSpecialties(recipes: Recipe[]): Recipe[] {
+  return recipes.map((r) => {
+    if (r.specialties && r.specialties.length > 0) {
+      return r;
+    }
+    const defaults = DEFAULT_SPECIALTIES_BY_RECIPE[r.id] || [
+      {
+        id: `${r.id}-spec-clasica`,
+        name: 'Clásica (Normal)',
+        emoji: '✨',
+        description: 'Versión tradicional',
+        isDefault: true,
+        extraBaseCost: 0,
+      },
+    ];
+    return {
+      ...r,
+      specialties: defaults,
+    };
+  });
+}
+
 function loadInitialState(): PersistedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -135,7 +168,7 @@ function loadInitialState(): PersistedState {
         return {
           settings: { ...INITIAL_SETTINGS, ...(parsed.settings || {}) },
           supplies: parsed.supplies,
-          recipes: parsed.recipes,
+          recipes: ensureRecipesSpecialties(parsed.recipes),
           orders: parsed.orders,
           movements: parsed.movements,
         };
@@ -147,7 +180,7 @@ function loadInitialState(): PersistedState {
   return {
     settings: INITIAL_SETTINGS,
     supplies: INITIAL_SUPPLIES,
-    recipes: INITIAL_RECIPES,
+    recipes: ensureRecipesSpecialties(INITIAL_RECIPES),
     orders: INITIAL_ORDERS,
     movements: INITIAL_CASH_MOVEMENTS,
   };
@@ -194,7 +227,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setState({
         settings: { ...INITIAL_SETTINGS, ...(res.state.settings || {}) },
         supplies: res.state.supplies,
-        recipes: res.state.recipes,
+        recipes: ensureRecipesSpecialties(res.state.recipes),
         orders: res.state.orders || [],
         movements: res.state.movements || [],
       });
@@ -267,7 +300,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (pullRes.state && pullRes.state.supplies && pullRes.state.recipes) {
       isHydratingFromCloud.current = true;
-      setState(pullRes.state);
+      setState({
+        ...pullRes.state,
+        recipes: ensureRecipesSpecialties(pullRes.state.recipes),
+      });
       hasCompletedInitialPull.current = true;
       setCloudStatus('synced');
       setTimeout(() => {
@@ -474,16 +510,82 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   };
 
-  const applyPricingToVariant: StoreContextValue['applyPricingToVariant'] = (
+  const upsertSpecialty: StoreContextValue['upsertSpecialty'] = (recipeId, specialty) => {
+    setState((prev) => ({
+      ...prev,
+      recipes: prev.recipes.map((r) => {
+        if (r.id !== recipeId) return r;
+        const list = r.specialties || [];
+        const exists = list.some((s) => s.id === specialty.id);
+        return {
+          ...r,
+          specialties: exists
+            ? list.map((s) => (s.id === specialty.id ? specialty : s))
+            : [...list, specialty],
+        };
+      }),
+    }));
+  };
+
+  const deleteSpecialty: StoreContextValue['deleteSpecialty'] = (
     recipeId,
-    variantId,
-    markupPercent,
-    manualSalePrice
+    specialtyId
   ) => {
     setState((prev) => ({
       ...prev,
       recipes: prev.recipes.map((r) => {
         if (r.id !== recipeId) return r;
+        const list = r.specialties || [];
+        const filtered = list.filter((s) => s.id !== specialtyId || s.isDefault);
+        return {
+          ...r,
+          specialties: filtered,
+        };
+      }),
+    }));
+  };
+
+  const adjustVariantReadyStock: StoreContextValue['adjustVariantReadyStock'] = (
+    recipeId,
+    variantId,
+    specialtyId,
+    newReadyQty
+  ) => {
+    const safeQty = Math.max(0, Math.round(newReadyQty));
+    setState((prev) => ({
+      ...prev,
+      recipes: prev.recipes.map((r) => {
+        if (r.id !== recipeId) return r;
+        return {
+          ...r,
+          variants: r.variants.map((v) => {
+            if (v.id !== variantId) return v;
+            const currentMap = { ...(v.readyStockBySpecialty || {}) };
+            currentMap[specialtyId || 'default'] = safeQty;
+            return {
+              ...v,
+              readyStockBySpecialty: currentMap,
+            };
+          }),
+        };
+      }),
+    }));
+  };
+
+  const applyPricingToVariant: StoreContextValue['applyPricingToVariant'] = (
+    recipeId,
+    variantId,
+    markupPercent,
+    manualSalePrice,
+    specialtyId
+  ) => {
+    setState((prev) => ({
+      ...prev,
+      recipes: prev.recipes.map((r) => {
+        if (r.id !== recipeId) return r;
+        const targetSpec = (r.specialties || []).find((s) => s.id === specialtyId);
+        const isSpecialVersion = targetSpec && !targetSpec.isDefault;
+
         return {
           ...r,
           variants: r.variants.map((v) =>
@@ -491,11 +593,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               ? {
                   ...v,
                   defaultMarkupPercent: markupPercent,
-                  manualSalePrice:
-                    manualSalePrice && manualSalePrice > 0 ? manualSalePrice : undefined,
+                  manualSalePrice: !isSpecialVersion
+                    ? manualSalePrice && manualSalePrice > 0
+                      ? manualSalePrice
+                      : undefined
+                    : v.manualSalePrice,
                 }
               : v
           ),
+          specialties: isSpecialVersion
+            ? (r.specialties || []).map((s) => {
+                if (s.id !== specialtyId) return s;
+                const nextPrices = { ...(s.manualPricesByVariant || {}) };
+                if (manualSalePrice && manualSalePrice > 0) {
+                  nextPrices[variantId] = manualSalePrice;
+                } else {
+                  delete nextPrices[variantId];
+                }
+                return {
+                  ...s,
+                  manualPricesByVariant: nextPrices,
+                };
+              })
+            : r.specialties,
         };
       }),
     }));
@@ -773,6 +893,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateVariantCustomIngredients,
         upsertVariant,
         deleteVariant,
+        upsertSpecialty,
+        deleteSpecialty,
+        adjustVariantReadyStock,
         applyPricingToVariant,
         createOrder,
         updateOrder,

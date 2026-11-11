@@ -45,6 +45,7 @@ export const SuppliesView: React.FC = () => {
   const [editingSupplyId, setEditingSupplyId] = useState<string | null>(null);
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState<SupplyCategory>('ingrediente');
+  const [formAssignedRecipeId, setFormAssignedRecipeId] = useState<string>('all');
   const [formPrice, setFormPrice] = useState('');
   const [formAmount, setFormAmount] = useState('');
   const [formUnit, setFormUnit] = useState<PurchaseUnit>('kg');
@@ -77,6 +78,7 @@ export const SuppliesView: React.FC = () => {
     setEditingSupplyId(null);
     setFormName('');
     setFormCategory(defaultCat);
+    setFormAssignedRecipeId('all');
     setFormPrice('');
     setFormAmount(defaultCat === 'ingrediente' ? '1' : '10');
     setFormUnit(defaultCat === 'ingrediente' ? 'kg' : 'pack');
@@ -89,6 +91,7 @@ export const SuppliesView: React.FC = () => {
     setEditingSupplyId(supply.id);
     setFormName(supply.name);
     setFormCategory(supply.category);
+    setFormAssignedRecipeId(supply.assignedRecipeId || 'all');
     setFormPrice(String(supply.purchasePrice));
     setFormAmount(String(supply.purchaseAmount));
     setFormUnit(supply.purchaseUnit);
@@ -109,6 +112,7 @@ export const SuppliesView: React.FC = () => {
       id: editingSupplyId || undefined,
       name: formName.trim(),
       category: formCategory,
+      assignedRecipeId: formAssignedRecipeId === 'all' ? undefined : formAssignedRecipeId,
       purchasePrice: price,
       purchaseAmount: amount,
       purchaseUnit: formUnit,
@@ -575,7 +579,23 @@ export const SuppliesView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Optional Stock Control */}
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  ¿A qué torta pertenece?
+                </label>
+                <select
+                  value={formAssignedRecipeId}
+                  onChange={(e) => setFormAssignedRecipeId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-bold text-stone-800"
+                >
+                  <option value="all">📋 Uso General / Todas las tortas</option>
+                  {recipes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.emoji} Exclusivo para {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="pt-2 border-t border-stone-100">
                 <p className="text-xs font-bold text-stone-600 mb-2">
                   Control de Stock Físico en Alacena (Opcional en {modalPreview.baseUnit})

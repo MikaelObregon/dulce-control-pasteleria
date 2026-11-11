@@ -4,22 +4,17 @@ import {
   Calculator,
   Check,
   ChefHat,
-  ChevronDown,
-  ChevronUp,
   Coins,
   Copy,
   Edit3,
-  Flame,
   Layers,
   Lock,
   Minus,
-  Package,
   Percent,
   Plus,
   RotateCcw,
-  Scale,
-  Sliders,
   Sparkles,
+  Star,
   Trash2,
   TrendingUp,
   X,
@@ -27,13 +22,12 @@ import {
 import { useStore } from '../../context/StoreContext';
 import {
   calculateVariantCostBreakdown,
-  formatUnitCost,
   simulatePricing,
 } from '../../services/calculations';
 import {
   Recipe,
-  RecipeIngredientLine,
   RecipePackagingLine,
+  RecipeSpecialty,
   RecipeVariant,
   SizeFormat,
 } from '../../types/domain';
@@ -53,10 +47,10 @@ export const CakesAndPricingView: React.FC = () => {
     settings,
     formatMoney,
     applyPricingToVariant,
-    updateRecipeBaseIngredients,
-    updateVariantCustomIngredients,
     upsertVariant,
     deleteVariant,
+    upsertSpecialty,
+    deleteSpecialty,
     upsertRecipe,
     deleteRecipe,
   } = useStore();
@@ -68,6 +62,34 @@ export const CakesAndPricingView: React.FC = () => {
   const activeRecipe = useMemo(
     () => recipes.find((r) => r.id === selectedRecipeId) || recipes[0],
     [recipes, selectedRecipeId]
+  );
+
+  const specialties = useMemo<RecipeSpecialty[]>(() => {
+    if (activeRecipe?.specialties && activeRecipe.specialties.length > 0) {
+      return activeRecipe.specialties;
+    }
+    return [
+      {
+        id: `${activeRecipe?.id || 'rec'}-spec-clasica`,
+        name: 'Clásica (Normal)',
+        emoji: '✨',
+        description: 'Versión tradicional',
+        isDefault: true,
+        extraBaseCost: 0,
+      },
+    ];
+  }, [activeRecipe]);
+
+  const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(
+    specialties[0]?.id || ''
+  );
+
+  const activeSpecialty = useMemo(
+    () =>
+      specialties.find((s) => s.id === selectedSpecialtyId) ||
+      specialties.find((s) => s.isDefault) ||
+      specialties[0],
+    [specialties, selectedSpecialtyId]
   );
 
   const [selectedVariantId, setSelectedVariantId] = useState<string>(
@@ -88,54 +110,60 @@ export const CakesAndPricingView: React.FC = () => {
 
   const breakdown = useMemo(() => {
     if (!activeRecipe || !activeVariant) return null;
-    return calculateVariantCostBreakdown(activeRecipe, activeVariant, supplies);
-  }, [activeRecipe, activeVariant, supplies]);
+    return calculateVariantCostBreakdown(
+      activeRecipe,
+      activeVariant,
+      supplies,
+      activeSpecialty
+    );
+  }, [activeRecipe, activeVariant, supplies, activeSpecialty]);
 
   // Pricing interactive states
   const [desiredPercent, setDesiredPercent] = useState<number>(
     activeVariant?.defaultMarkupPercent ?? 100
   );
-  const [customPriceInput, setCustomPriceInput] = useState<string>(
-    activeVariant?.manualSalePrice ? String(activeVariant.manualSalePrice) : ''
-  );
+  const [customPriceInput, setCustomPriceInput] = useState<string>('');
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const [copiedWhatsApp, setCopiedWhatsApp] = useState(false);
-  const [showRecipeDetails, setShowRecipeDetails] = useState(false);
 
-  // Modals for editing recipe / custom variant ingredients / sizes / new product
-  const [isEditingBase, setIsEditingBase] = useState(false);
-  const [editingMode, setEditingMode] = useState<'base' | 'variant_custom'>('base');
-  const [draftIngredients, setDraftIngredients] = useState<RecipeIngredientLine[]>([]);
-
+  // Modal: Edit / Add Size Variant
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [vName, setVName] = useState('');
   const [vFormat, setVFormat] = useState<SizeFormat>('mediana');
   const [vServings, setVServings] = useState('');
   const [vScale, setVScale] = useState('1');
+  const [vDirectCost, setVDirectCost] = useState('');
   const [vUtilityPct, setVUtilityPct] = useState('6');
   const [vPackaging, setVPackaging] = useState<RecipePackagingLine[]>([]);
 
+  // Modal: Edit / Add Specialty ("Normal" vs "Con Algo Especial")
+  const [isSpecialtyModalOpen, setIsSpecialtyModalOpen] = useState(false);
+  const [editingSpecialtyId, setEditingSpecialtyId] = useState<string | null>(null);
+  const [specName, setSpecName] = useState('');
+  const [specEmoji, setSpecEmoji] = useState('🍓');
+  const [specDesc, setSpecDesc] = useState('');
+  const [specExtraBaseCost, setSpecExtraBaseCost] = useState('');
+  const [specCustomVariantExtraCost, setSpecCustomVariantExtraCost] = useState('');
+
+  // Modal: New / Edit Recipe (Torta)
   const [isNewRecipeModalOpen, setIsNewRecipeModalOpen] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [newRecipeName, setNewRecipeName] = useState('');
   const [newRecipeEmoji, setNewRecipeEmoji] = useState('🍰');
   const [newRecipeDescription, setNewRecipeDescription] = useState('');
-  const [newRecipeYieldLabel, setNewRecipeYieldLabel] = useState('');
 
   useEffect(() => {
     if (activeVariant) {
       setDesiredPercent(activeVariant.defaultMarkupPercent);
-      setCustomPriceInput(
-        activeVariant.manualSalePrice ? String(activeVariant.manualSalePrice) : ''
-      );
+      const specManual =
+        activeSpecialty && !activeSpecialty.isDefault
+          ? activeSpecialty.manualPricesByVariant?.[activeVariant.id]
+          : activeVariant.manualSalePrice;
+      setCustomPriceInput(specManual ? String(specManual) : '');
     }
-  }, [activeVariant]);
+  }, [activeVariant, activeSpecialty]);
 
-  const ingredientSupplies = useMemo(
-    () => supplies.filter((s) => s.category === 'ingrediente'),
-    [supplies]
-  );
   const packagingSupplies = useMemo(
     () => supplies.filter((s) => s.category === 'envase'),
     [supplies]
@@ -184,6 +212,10 @@ export const CakesAndPricingView: React.FC = () => {
     const defaultVar =
       recipe.variants.find((v) => v.format === 'mediana') || recipe.variants[0];
     if (defaultVar) setSelectedVariantId(defaultVar.id);
+    const defaultSpec =
+      (recipe.specialties || []).find((s) => s.isDefault) ||
+      (recipe.specialties || [])[0];
+    if (defaultSpec) setSelectedSpecialtyId(defaultSpec.id);
   };
 
   const handleSavePriceToCatalog = (useCustom: boolean) => {
@@ -200,12 +232,19 @@ export const CakesAndPricingView: React.FC = () => {
       activeRecipe.id,
       activeVariant.id,
       desiredPercent,
-      manualVal
+      manualVal,
+      activeSpecialty?.id
     );
+
+    const specLabel =
+      activeSpecialty && !activeSpecialty.isDefault
+        ? ` (${activeSpecialty.name})`
+        : '';
+
     setSaveFeedback(
       manualVal
-        ? `¡Precio guardado! "${activeVariant.name}" quedó en ${formatMoney(manualVal)}.`
-        : `¡Precio sugerido guardado! "${activeVariant.name}" quedó en ${formatMoney(suggestedPrice)} (+${desiredPercent}%).`
+        ? `¡Precio guardado! "${activeVariant.name}${specLabel}" quedó en ${formatMoney(manualVal)}.`
+        : `¡Precio sugerido guardado! "${activeVariant.name}${specLabel}" quedó en ${formatMoney(suggestedPrice)} (+${desiredPercent}%).`
     );
     setTimeout(() => setSaveFeedback(null), 3500);
   };
@@ -217,11 +256,29 @@ export const CakesAndPricingView: React.FC = () => {
     ];
     for (const r of recipes) {
       lines.push(`${r.emoji} *${r.name}*`);
-      for (const v of r.variants) {
-        const b = calculateVariantCostBreakdown(r, v, supplies);
-        lines.push(
-          `  • ${v.name} (${v.servingsLabel}): *${formatMoney(b.effectiveSalePrice)}*`
-        );
+      const rSpecs =
+        r.specialties && r.specialties.length > 0
+          ? r.specialties
+          : [
+              {
+                id: 'default',
+                name: 'Clásica',
+                emoji: '✨',
+                isDefault: true,
+                extraBaseCost: 0,
+              },
+            ];
+
+      for (const spec of rSpecs) {
+        if (rSpecs.length > 1) {
+          lines.push(`  ${spec.emoji} _${spec.name}:_`);
+        }
+        for (const v of r.variants) {
+          const b = calculateVariantCostBreakdown(r, v, supplies, spec);
+          lines.push(
+            `    • ${v.name} (${v.servingsLabel}): *${formatMoney(b.effectiveSalePrice)}*`
+          );
+        }
       }
       lines.push('');
     }
@@ -232,41 +289,20 @@ export const CakesAndPricingView: React.FC = () => {
     setTimeout(() => setCopiedWhatsApp(false), 3000);
   };
 
-  const openIngredientsEditor = (mode: 'base' | 'variant_custom') => {
-    setEditingMode(mode);
-    if (mode === 'base') {
-      setDraftIngredients(activeRecipe.baseIngredients.map((i) => ({ ...i })));
-    } else {
-      const currentList =
-        activeVariant.customIngredients && activeVariant.customIngredients.length > 0
-          ? activeVariant.customIngredients
-          : activeRecipe.baseIngredients.map((i) => ({
-              supplyId: i.supplyId,
-              quantity: Number((i.quantity * activeVariant.scaleFactor).toFixed(1)),
-            }));
-      setDraftIngredients(currentList.map((i) => ({ ...i })));
-    }
-    setIsEditingBase(true);
-  };
-
-  const saveIngredientsModal = (e: React.FormEvent) => {
-    e.preventDefault();
-    const valid = draftIngredients.filter((i) => i.supplyId && i.quantity > 0);
-    if (editingMode === 'base') {
-      updateRecipeBaseIngredients(activeRecipe.id, valid);
-    } else {
-      updateVariantCustomIngredients(activeRecipe.id, activeVariant.id, valid);
-    }
-    setIsEditingBase(false);
-  };
-
+  // --- Size Variant Modal Handlers ---
   const openEditVariantModal = (variant?: RecipeVariant) => {
     if (variant) {
+      const varBaseBreak = calculateVariantCostBreakdown(activeRecipe, variant, supplies);
       setEditingVariantId(variant.id);
       setVName(variant.name);
       setVFormat(variant.format);
       setVServings(variant.servingsLabel);
       setVScale(String(variant.scaleFactor));
+      setVDirectCost(
+        variant.directIngredientsCost !== undefined
+          ? String(variant.directIngredientsCost)
+          : String(Math.round(varBaseBreak.baseIngredientsCost))
+      );
       setVUtilityPct(String(variant.utilityPercent));
       setVPackaging(variant.packagingItems.map((p) => ({ ...p })));
     } else {
@@ -275,6 +311,7 @@ export const CakesAndPricingView: React.FC = () => {
       setVFormat('porcion');
       setVServings('1 porción');
       setVScale('0.125');
+      setVDirectCost('1500');
       setVUtilityPct(String(settings.defaultUtilityPercent));
       setVPackaging(
         packagingSupplies[0] ? [{ supplyId: packagingSupplies[0].id, quantity: 1 }] : []
@@ -290,17 +327,24 @@ export const CakesAndPricingView: React.FC = () => {
       ? activeRecipe.variants.find((v) => v.id === editingVariantId)
       : undefined;
     const id = editingVariantId || `var-${Date.now()}`;
+    const parsedDirectCost =
+      vDirectCost.trim() !== '' && Number(vDirectCost) >= 0
+        ? Number(vDirectCost)
+        : undefined;
+
     const newVar: RecipeVariant = {
       id,
       name: vName.trim(),
       format: vFormat,
       servingsLabel: vServings.trim() || FORMAT_LABELS[vFormat].label,
       scaleFactor: Math.max(0.01, Number(vScale) || 1),
+      directIngredientsCost: parsedDirectCost,
       customIngredients: existingVar ? existingVar.customIngredients : undefined,
       packagingItems: vPackaging.filter((p) => p.supplyId && p.quantity > 0),
       utilityPercent: Math.max(0, Number(vUtilityPct) || 0),
       defaultMarkupPercent: existingVar ? existingVar.defaultMarkupPercent : desiredPercent,
       manualSalePrice: existingVar ? existingVar.manualSalePrice : undefined,
+      readyStockBySpecialty: existingVar ? existingVar.readyStockBySpecialty : undefined,
     };
     upsertVariant(activeRecipe.id, newVar);
     setSelectedVariantId(id);
@@ -351,19 +395,102 @@ export const CakesAndPricingView: React.FC = () => {
     }
   };
 
+  // --- Specialty ("Normal" vs "Con Algo Especial") Modal Handlers ---
+  const openSpecialtyModal = (spec?: RecipeSpecialty) => {
+    if (spec) {
+      setEditingSpecialtyId(spec.id);
+      setSpecName(spec.name);
+      setSpecEmoji(spec.emoji || '🍓');
+      setSpecDesc(spec.description || '');
+      setSpecExtraBaseCost(String(spec.extraBaseCost || 0));
+      const customForActiveVar = spec.extraCostByVariant?.[activeVariant.id];
+      setSpecCustomVariantExtraCost(
+        customForActiveVar !== undefined ? String(customForActiveVar) : ''
+      );
+    } else {
+      setEditingSpecialtyId(null);
+      setSpecName('');
+      setSpecEmoji('🍓');
+      setSpecDesc('');
+      setSpecExtraBaseCost('1500');
+      setSpecCustomVariantExtraCost('');
+    }
+    setIsSpecialtyModalOpen(true);
+  };
+
+  const handleSaveSpecialty = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!specName.trim()) return;
+    const existing = editingSpecialtyId
+      ? specialties.find((s) => s.id === editingSpecialtyId)
+      : undefined;
+    const id = editingSpecialtyId || `spec-${Date.now()}`;
+
+    const nextExtraByVariant = { ...(existing?.extraCostByVariant || {}) };
+    if (
+      specCustomVariantExtraCost.trim() !== '' &&
+      Number(specCustomVariantExtraCost) >= 0
+    ) {
+      nextExtraByVariant[activeVariant.id] = Number(specCustomVariantExtraCost);
+    } else {
+      delete nextExtraByVariant[activeVariant.id];
+    }
+
+    const newSpec: RecipeSpecialty = {
+      id,
+      name: specName.trim(),
+      emoji: specEmoji || '🍓',
+      description: specDesc.trim() || undefined,
+      isDefault: existing?.isDefault || false,
+      extraBaseCost: existing?.isDefault
+        ? 0
+        : Math.max(0, Number(specExtraBaseCost) || 0),
+      manualPricesByVariant: existing?.manualPricesByVariant,
+      extraCostByVariant: nextExtraByVariant,
+    };
+
+    upsertSpecialty(activeRecipe.id, newSpec);
+    setSelectedSpecialtyId(id);
+    setIsSpecialtyModalOpen(false);
+    setSaveFeedback(
+      editingSpecialtyId
+        ? `¡Versión "${newSpec.name}" actualizada!`
+        : `¡Nueva versión especial "${newSpec.name}" agregada!`
+    );
+    setTimeout(() => setSaveFeedback(null), 3000);
+  };
+
+  const handleDeleteSpecialtyConfirm = (spec: RecipeSpecialty) => {
+    if (spec.isDefault) {
+      window.alert('La versión Clásica (Normal) es la base de la torta y no se puede eliminar.');
+      return;
+    }
+    if (
+      window.confirm(
+        `¿Eliminar la versión especial "${spec.name}" de ${activeRecipe.name}?`
+      )
+    ) {
+      deleteSpecialty(activeRecipe.id, spec.id);
+      const fallback = specialties.find((s) => s.isDefault) || specialties[0];
+      if (fallback) setSelectedSpecialtyId(fallback.id);
+      setIsSpecialtyModalOpen(false);
+      setSaveFeedback(`Versión "${spec.name}" eliminada.`);
+      setTimeout(() => setSaveFeedback(null), 3000);
+    }
+  };
+
+  // --- Recipe (Torta) Modal Handlers ---
   const openRecipeModal = (recipeToEdit?: Recipe) => {
     if (recipeToEdit) {
       setEditingRecipeId(recipeToEdit.id);
       setNewRecipeName(recipeToEdit.name);
       setNewRecipeEmoji(recipeToEdit.emoji);
       setNewRecipeDescription(recipeToEdit.description);
-      setNewRecipeYieldLabel(recipeToEdit.baseYieldLabel);
     } else {
       setEditingRecipeId(null);
       setNewRecipeName('');
       setNewRecipeEmoji('🍰');
-      setNewRecipeDescription('Receta artesanal personalizada');
-      setNewRecipeYieldLabel('Receta Base = 1 Torta Mediana (8 porciones)');
+      setNewRecipeDescription('Torta artesanal');
     }
     setIsNewRecipeModalOpen(true);
   };
@@ -380,7 +507,6 @@ export const CakesAndPricingView: React.FC = () => {
           name: newRecipeName.trim(),
           emoji: newRecipeEmoji || '🍰',
           description: newRecipeDescription.trim() || target.description,
-          baseYieldLabel: newRecipeYieldLabel.trim() || target.baseYieldLabel,
         });
       }
       setIsNewRecipeModalOpen(false);
@@ -390,18 +516,33 @@ export const CakesAndPricingView: React.FC = () => {
 
     const newId = `recipe-${Date.now()}`;
     const defaultVarId = `var-${Date.now()}-med`;
+    const defaultSpecId = `${newId}-spec-clasica`;
     const newRecipe: Recipe = {
       id: newId,
       name: newRecipeName.trim(),
-      description: newRecipeDescription.trim() || 'Receta artesanal personalizada',
+      description: newRecipeDescription.trim() || 'Torta artesanal',
       emoji: newRecipeEmoji || '🍰',
       accentColor: 'pink',
-      baseYieldLabel:
-        newRecipeYieldLabel.trim() || 'Receta Base = 1 Torta Mediana (8 porciones)',
-      baseIngredients: ingredientSupplies.slice(0, 3).map((s) => ({
-        supplyId: s.id,
-        quantity: s.baseUnit === 'u' ? 3 : 200,
-      })),
+      baseYieldLabel: '1 Torta Mediana (8 porciones)',
+      baseIngredients: [],
+      specialties: [
+        {
+          id: defaultSpecId,
+          name: 'Clásica (Normal)',
+          emoji: '✨',
+          description: 'Versión tradicional',
+          isDefault: true,
+          extraBaseCost: 0,
+        },
+        {
+          id: `${newId}-spec-especial`,
+          name: 'Con Relleno / Topping Especial',
+          emoji: '🍓',
+          description: 'Con agregado especial',
+          isDefault: false,
+          extraBaseCost: 1500,
+        },
+      ],
       variants: [
         {
           id: defaultVarId,
@@ -409,6 +550,7 @@ export const CakesAndPricingView: React.FC = () => {
           format: 'mediana',
           servingsLabel: '8 porciones',
           scaleFactor: 1,
+          directIngredientsCost: 6000,
           packagingItems: packagingSupplies[0]
             ? [{ supplyId: packagingSupplies[0].id, quantity: 1 }]
             : [],
@@ -420,6 +562,7 @@ export const CakesAndPricingView: React.FC = () => {
     upsertRecipe(newRecipe);
     setSelectedRecipeId(newId);
     setSelectedVariantId(defaultVarId);
+    setSelectedSpecialtyId(defaultSpecId);
     setIsNewRecipeModalOpen(false);
     setNewRecipeName('');
   };
@@ -450,14 +593,14 @@ export const CakesAndPricingView: React.FC = () => {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider bg-white/20 backdrop-blur-xs px-3 py-1 rounded-full mb-1.5">
-              <ChefHat className="w-3.5 h-3.5" /> Catálogo + Costos + Calculadora
+              <ChefHat className="w-3.5 h-3.5" /> Catálogo + Versiones Especiales + Precios
             </span>
             <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">
               Tus Tortas y Precios
             </h1>
             <p className="text-xs text-rose-100 mt-0.5">
-              Compara el precio sugerido o pon tu propio precio manual y mira tu ganancia al
-              instante.
+              Elige entre la versión Normal o con Algo Especial, edita tamaños y mira tu
+              ganancia limpia al instante.
             </p>
           </div>
 
@@ -540,12 +683,146 @@ export const CakesAndPricingView: React.FC = () => {
         </button>
       </div>
 
+      {/* 2B. SELECTOR DE VERSIÓN: NORMAL VS CON ALGO ESPECIAL */}
+      <div className="bg-gradient-to-r from-amber-50 via-rose-50/70 to-amber-50 rounded-3xl p-4 border border-amber-200/90 shadow-xs space-y-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <span className="text-xs font-extrabold uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+              <Star className="w-4 h-4 text-amber-600 fill-amber-500" />
+              Versión de {activeRecipe.name} (Normal o Con Algo Especial):
+            </span>
+            <p className="text-[11px] text-stone-600">
+              Cambia entre la versión clásica o con rellenos/toppings especiales con su propio
+              costo y precio.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => openSpecialtyModal(undefined)}
+            className="inline-flex items-center gap-1 text-xs font-extrabold text-white bg-amber-600 hover:bg-amber-700 px-3.5 py-1.5 rounded-full shadow-2xs transition cursor-pointer shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" /> + Agregar Especial
+          </button>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+          {specialties.map((spec) => {
+            const isSelected = spec.id === activeSpecialty?.id;
+            const specBreak = calculateVariantCostBreakdown(
+              activeRecipe,
+              activeVariant,
+              supplies,
+              spec
+            );
+
+            return (
+              <div
+                key={spec.id}
+                onClick={() => setSelectedSpecialtyId(spec.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedSpecialtyId(spec.id);
+                }}
+                className={`min-w-[185px] p-3 rounded-2xl border-2 text-left transition-all cursor-pointer shrink-0 flex flex-col justify-between ${
+                  isSelected
+                    ? 'bg-stone-900 text-white border-stone-900 shadow-md'
+                    : 'bg-white text-stone-800 border-amber-200 hover:border-amber-400'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="text-base">{spec.emoji}</span>
+                    {spec.isDefault ? (
+                      <span
+                        className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                          isSelected
+                            ? 'bg-emerald-400 text-stone-950'
+                            : 'bg-stone-100 text-stone-600'
+                        }`}
+                      >
+                        Base Normal
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                          isSelected
+                            ? 'bg-amber-400 text-stone-950'
+                            : 'bg-amber-100 text-amber-900'
+                        }`}
+                      >
+                        +{formatMoney(specBreak.specialtyExtraCost)} costo extra
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-extrabold mt-1.5 leading-snug">{spec.name}</p>
+                  {spec.description && (
+                    <p
+                      className={`text-[10px] mt-0.5 line-clamp-1 ${
+                        isSelected ? 'text-stone-300' : 'text-stone-500'
+                      }`}
+                    >
+                      {spec.description}
+                    </p>
+                  )}
+                  <p
+                    className={`text-sm font-black mt-1 ${
+                      isSelected ? 'text-amber-300' : 'text-pink-700'
+                    }`}
+                  >
+                    {activeVariant.name}: {formatMoney(specBreak.effectiveSalePrice)}
+                  </p>
+                </div>
+
+                {!spec.isDefault && (
+                  <div
+                    className={`flex items-center justify-end gap-1 mt-2 pt-1.5 border-t ${
+                      isSelected ? 'border-white/15' : 'border-stone-100'
+                    }`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSpecialtyId(spec.id);
+                        openSpecialtyModal(spec);
+                      }}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer ${
+                        isSelected
+                          ? 'bg-white/20 text-white hover:bg-white/30'
+                          : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                      }`}
+                    >
+                      <Edit3 className="w-3 h-3" /> Editar Extra
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSpecialtyConfirm(spec)}
+                      className={`p-1 rounded-lg cursor-pointer ${
+                        isSelected
+                          ? 'bg-white/15 text-red-200 hover:bg-red-600 hover:text-white'
+                          : 'bg-stone-100 text-stone-500 hover:bg-red-100 hover:text-red-700'
+                      }`}
+                      title="Eliminar esta versión especial"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 3. SELECTOR TÁCTIL DE TAMAÑO / FORMATO */}
       <div className="bg-white rounded-3xl p-4 border border-stone-200/80 shadow-xs space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs font-extrabold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-pink-700" />
-            Tamaños de {activeRecipe.name} ({activeRecipe.variants.length}):
+            Tamaños de {activeRecipe.name} —{' '}
+            <strong className="text-pink-700">{activeSpecialty?.name}</strong>:
           </span>
           <button
             onClick={() => openEditVariantModal(undefined)}
@@ -557,9 +834,18 @@ export const CakesAndPricingView: React.FC = () => {
 
         <div className="flex sm:grid sm:grid-cols-5 gap-2 overflow-x-auto no-scrollbar pb-1">
           {activeRecipe.variants.map((variant) => {
-            const vBreak = calculateVariantCostBreakdown(activeRecipe, variant, supplies);
+            const vBreak = calculateVariantCostBreakdown(
+              activeRecipe,
+              variant,
+              supplies,
+              activeSpecialty
+            );
             const isSelected = variant.id === activeVariant.id;
             const fmt = FORMAT_LABELS[variant.format];
+            const hasManualForThisSpec =
+              activeSpecialty && !activeSpecialty.isDefault
+                ? Boolean(activeSpecialty.manualPricesByVariant?.[variant.id])
+                : Boolean(variant.manualSalePrice);
 
             return (
               <div
@@ -580,7 +866,7 @@ export const CakesAndPricingView: React.FC = () => {
                   <div className="flex items-center justify-between gap-1">
                     <span className="text-base">{fmt.icon}</span>
                     <div className="flex items-center gap-1">
-                      {variant.manualSalePrice ? (
+                      {hasManualForThisSpec ? (
                         <span
                           className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
                             isSelected
@@ -676,8 +962,10 @@ export const CakesAndPricingView: React.FC = () => {
         {/* Barra de acciones directas del tamaño seleccionado */}
         <div className="bg-stone-50 border border-stone-200/80 rounded-2xl p-2.5 flex items-center justify-between gap-2 flex-wrap">
           <div className="text-xs font-bold text-stone-700 pl-1">
-            Tamaño activo: <span className="font-extrabold text-pink-800">{activeVariant.name}</span>{' '}
-            <span className="text-stone-400">({activeVariant.servingsLabel})</span>
+            Seleccionado:{' '}
+            <span className="font-extrabold text-pink-800">
+              {activeVariant.name} ({activeSpecialty?.name})
+            </span>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
@@ -685,15 +973,18 @@ export const CakesAndPricingView: React.FC = () => {
               onClick={() => openEditVariantModal(activeVariant)}
               className="inline-flex items-center gap-1 text-xs font-extrabold bg-white hover:bg-pink-50 text-stone-800 border border-stone-300 px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
             >
-              <Edit3 className="w-3.5 h-3.5 text-pink-700" /> Editar Tamaño / Envases
+              <Edit3 className="w-3.5 h-3.5 text-pink-700" /> Editar Tamaño / Costo / Envases
             </button>
-            <button
-              type="button"
-              onClick={() => openIngredientsEditor('variant_custom')}
-              className="inline-flex items-center gap-1 text-xs font-extrabold bg-white hover:bg-purple-50 text-stone-800 border border-stone-300 px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
-            >
-              <Sliders className="w-3.5 h-3.5 text-purple-700" /> Editar Gramos
-            </button>
+            {activeSpecialty && !activeSpecialty.isDefault && (
+              <button
+                type="button"
+                onClick={() => openSpecialtyModal(activeSpecialty)}
+                className="inline-flex items-center gap-1 text-xs font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer"
+              >
+                <Star className="w-3.5 h-3.5 text-amber-600" /> Editar Extra (
+                {activeSpecialty.name})
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleDuplicateVariant(activeVariant)}
@@ -718,16 +1009,24 @@ export const CakesAndPricingView: React.FC = () => {
 
       {/* 4. TARJETA PRINCIPAL DE PRICING: SUGERIDO VS TU PRECIO + GANANCIA EN VIVO */}
       <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200/90 shadow-sm space-y-5">
-        {/* Resumen de los 3 costos de este tamaño */}
+        {/* Resumen de los costos de este tamaño y versión */}
         <div className="bg-[#FDFBF7] border border-stone-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-3 flex-wrap">
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-stone-500 block">
-              Costo de Hacer 1 {activeVariant.name} ({activeVariant.servingsLabel})
+              Costo de Hacer 1 {activeVariant.name} ·{' '}
+              <strong className="text-pink-700">{activeSpecialty?.name}</strong>
             </span>
             <div className="flex items-center gap-3 text-xs text-stone-600 flex-wrap">
               <span>
-                🥛 Ingredientes: <strong>{formatMoney(breakdown.ingredientsCost)}</strong>
+                🥣 Base:{' '}
+                <strong>{formatMoney(breakdown.baseIngredientsCost)}</strong>
               </span>
+              {breakdown.specialtyExtraCost > 0 && (
+                <span className="bg-amber-100 text-amber-950 px-2 py-0.5 rounded-lg font-bold">
+                  {activeSpecialty?.emoji} Extra Especial: +
+                  {formatMoney(breakdown.specialtyExtraCost)}
+                </span>
+              )}
               <span>
                 📦 Packaging: <strong>{formatMoney(breakdown.packagingCost)}</strong>
               </span>
@@ -738,13 +1037,22 @@ export const CakesAndPricingView: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-stone-900 text-white px-3.5 py-2 rounded-2xl text-right">
-            <span className="text-[10px] uppercase tracking-wider text-stone-300 font-bold block">
-              Costo Total
-            </span>
-            <span className="text-lg font-black text-amber-300">
-              {formatMoney(breakdown.totalProductionCost)}
-            </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openEditVariantModal(activeVariant)}
+              className="text-xs font-extrabold text-pink-700 bg-pink-50 hover:bg-pink-100 px-3 py-2 rounded-xl cursor-pointer"
+            >
+              Cambiar Costo
+            </button>
+            <div className="bg-stone-900 text-white px-3.5 py-2 rounded-2xl text-right">
+              <span className="text-[10px] uppercase tracking-wider text-stone-300 font-bold block">
+                Costo Total
+              </span>
+              <span className="text-lg font-black text-amber-300">
+                {formatMoney(breakdown.totalProductionCost)}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -932,8 +1240,11 @@ export const CakesAndPricingView: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-stone-500 mt-1.5">
-                Escribe un monto o toca <strong>-{stepAmount} / +{stepAmount}</strong> para ver
-                cuánto ganas.
+                Este precio quedará guardado para{' '}
+                <strong>
+                  {activeVariant.name} ({activeSpecialty?.name})
+                </strong>
+                .
               </p>
             </div>
 
@@ -943,7 +1254,7 @@ export const CakesAndPricingView: React.FC = () => {
                 onClick={() => handleSavePriceToCatalog(true)}
                 className="mt-3 w-full py-2.5 rounded-2xl bg-pink-700 hover:bg-pink-800 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
-                <Check className="w-4 h-4" /> Dejar Fijo mi Precio de{' '}
+                <Check className="w-4 h-4" /> Dejar Fijo en{' '}
                 {formatMoney(Number(customPriceInput))}
               </button>
             ) : (
@@ -1086,272 +1397,13 @@ export const CakesAndPricingView: React.FC = () => {
         </div>
       </div>
 
-      {/* 5. DESPLEGABLE DE RECETA E INGREDIENTES (CON OPCIÓN DE PERSONALIZAR ESTE TAMAÑO) */}
-      <div className="bg-white rounded-3xl border border-stone-200/90 shadow-xs overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setShowRecipeDetails(!showRecipeDetails)}
-          className="w-full p-4 flex items-center justify-between gap-2 text-left hover:bg-stone-50/80 transition cursor-pointer"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-pink-50 text-pink-700">
-              <Scale className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-extrabold text-stone-900">
-                Receta, Gramos y Packaging de {activeVariant.name}
-              </h3>
-              <p className="text-xs text-stone-500">
-                {activeVariant.customIngredients
-                  ? 'Gramos personalizados para este tamaño'
-                  : `Escala automática ${activeVariant.scaleFactor}x de la receta base`}{' '}
-                · Toca para ver o editar
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 text-xs font-extrabold text-pink-700 bg-pink-50 px-3 py-1.5 rounded-full">
-            <span>{showRecipeDetails ? 'Ocultar' : 'Ver Receta'}</span>
-            {showRecipeDetails ? (
-              <ChevronUp className="w-4 h-4" />
-            ) : (
-              <ChevronDown className="w-4 h-4" />
-            )}
-          </div>
-        </button>
-
-        {showRecipeDetails && (
-          <div className="p-4 pt-0 border-t border-stone-100 space-y-3">
-            <div className="flex items-center justify-between gap-2 pt-3 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => openIngredientsEditor('base')}
-                  className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-pink-50 hover:bg-pink-100 text-pink-800 px-3 py-2 rounded-xl cursor-pointer"
-                >
-                  <Edit3 className="w-3.5 h-3.5" /> Editar Receta Base
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openIngredientsEditor('variant_custom')}
-                  className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-purple-50 hover:bg-purple-100 text-purple-900 px-3 py-2 rounded-xl cursor-pointer"
-                >
-                  <Sliders className="w-3.5 h-3.5" /> Gramos solo p/ {activeVariant.name}
-                </button>
-                {activeVariant.customIngredients && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateVariantCustomIngredients(
-                        activeRecipe.id,
-                        activeVariant.id,
-                        undefined
-                      )
-                    }
-                    className="text-[11px] font-bold text-stone-500 underline px-2 cursor-pointer"
-                  >
-                    Volver a escala automática ({activeVariant.scaleFactor}x)
-                  </button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => openEditVariantModal(activeVariant)}
-                  className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-900 px-3 py-2 rounded-xl cursor-pointer"
-                >
-                  <Package className="w-3.5 h-3.5" /> Envases y % Luz/Gas
-                </button>
-                {activeRecipe.variants.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm(`¿Eliminar el tamaño "${activeVariant.name}"?`)) {
-                        deleteVariant(activeRecipe.id, activeVariant.id);
-                      }
-                    }}
-                    className="p-2 text-stone-400 hover:text-red-600 rounded-lg cursor-pointer"
-                    title="Eliminar este tamaño"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="divide-y divide-stone-100">
-              {breakdown.ingredientLines.map((line) => (
-                <div
-                  key={line.supplyId}
-                  className="py-2.5 flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <span className="font-bold text-stone-800">{line.supplyName}</span>
-                    <span className="text-stone-500 ml-1.5">
-                      ({line.quantity.toLocaleString('es-AR')} {line.baseUnit} ×{' '}
-                      {formatUnitCost(line.unitCost, settings.currencySymbol)}/{line.baseUnit})
-                    </span>
-                  </div>
-                  <span className="font-bold text-stone-900">
-                    {formatMoney(line.subtotalCost)}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-2 border-t border-stone-100 space-y-1.5">
-              {breakdown.packagingLines.map((pkg) => (
-                <div
-                  key={pkg.supplyId}
-                  className="flex items-center justify-between text-xs bg-amber-50/70 text-amber-950 px-3 py-2 rounded-xl"
-                >
-                  <span>
-                    📦 {pkg.quantity} u. × {pkg.supplyName}
-                  </span>
-                  <span className="font-bold">{formatMoney(pkg.subtotalCost)}</span>
-                </div>
-              ))}
-              <div className="flex items-center justify-between text-xs bg-orange-50/70 text-orange-950 px-3 py-2 rounded-xl">
-                <span className="flex items-center gap-1">
-                  <Flame className="w-3.5 h-3.5 text-orange-600" /> Servicios: Gas, Luz y Horno (
-                  {breakdown.utilityPercent}%)
-                </span>
-                <span className="font-bold">{formatMoney(breakdown.utilityCost)}</span>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Modal: Edit Base or Custom Variant Ingredients */}
-      {isEditingBase && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
-              <div>
-                <h2 className="text-base font-extrabold text-stone-900">
-                  {editingMode === 'base'
-                    ? `Receta Base: ${activeRecipe.name}`
-                    : `Gramos Exclusivos para: ${activeVariant.name}`}
-                </h2>
-                <p className="text-xs text-stone-500">
-                  {editingMode === 'base'
-                    ? activeRecipe.baseYieldLabel
-                    : 'Estos gramos se usarán únicamente en este tamaño'}
-                </p>
-              </div>
-              <button
-                onClick={() => setIsEditingBase(false)}
-                className="p-1.5 text-stone-400 hover:text-stone-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={saveIngredientsModal} className="space-y-3 mt-4">
-              <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
-                {draftIngredients.map((line, idx) => {
-                  const sup = supplies.find((s) => s.id === line.supplyId);
-                  return (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-2 bg-stone-50 p-2 rounded-2xl border border-stone-200"
-                    >
-                      <select
-                        value={line.supplyId}
-                        onChange={(e) => {
-                          const next = [...draftIngredients];
-                          next[idx] = { ...next[idx], supplyId: e.target.value };
-                          setDraftIngredients(next);
-                        }}
-                        className="flex-1 bg-white border border-stone-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-800"
-                      >
-                        {ingredientSupplies.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} ({s.baseUnit})
-                          </option>
-                        ))}
-                      </select>
-
-                      <div className="flex items-center gap-1 w-28">
-                        <input
-                          type="number"
-                          step="any"
-                          min="0.1"
-                          required
-                          value={line.quantity}
-                          onChange={(e) => {
-                            const next = [...draftIngredients];
-                            next[idx] = {
-                              ...next[idx],
-                              quantity: Number(e.target.value) || 0,
-                            };
-                            setDraftIngredients(next);
-                          }}
-                          className="w-full bg-white border border-stone-300 rounded-xl px-2 py-2 text-xs font-bold text-right"
-                        />
-                        <span className="text-xs font-bold text-stone-500 w-5">
-                          {sup?.baseUnit || 'g'}
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDraftIngredients(draftIngredients.filter((_, i) => i !== idx))
-                        }
-                        className="p-1.5 text-stone-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const firstSup = ingredientSupplies[0];
-                  if (firstSup) {
-                    setDraftIngredients([
-                      ...draftIngredients,
-                      { supplyId: firstSup.id, quantity: 100 },
-                    ]);
-                  }
-                }}
-                className="w-full py-2.5 border border-dashed border-pink-400 rounded-2xl text-xs font-bold text-pink-700 bg-pink-50/50 cursor-pointer"
-              >
-                + Agregar Ingrediente
-              </button>
-
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingBase(false)}
-                  className="flex-1 py-3 rounded-2xl border border-stone-300 text-stone-700 font-semibold text-sm cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 rounded-2xl bg-pink-700 text-white font-bold text-sm shadow-md cursor-pointer"
-                >
-                  Guardar Cambios
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Modal: Edit / Add Size Variant */}
       {isVariantModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto shadow-2xl">
+          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[88vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-stone-100">
               <h2 className="text-base font-extrabold text-stone-900">
-                {editingVariantId ? 'Configurar Tamaño' : 'Nuevo Tamaño'}
+                {editingVariantId ? 'Editar Tamaño y Costos' : 'Nuevo Tamaño'}
               </h2>
               <button
                 onClick={() => setIsVariantModalOpen(false)}
@@ -1381,20 +1433,15 @@ export const CakesAndPricingView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-stone-700 mb-1">
-                    Proporción de Receta Base
+                    Porciones que rinde
                   </label>
                   <input
-                    type="number"
-                    step="0.005"
-                    min="0.01"
-                    required
-                    value={vScale}
-                    onChange={(e) => setVScale(e.target.value)}
-                    className="w-full px-3 py-2 border border-stone-300 rounded-xl text-sm font-bold"
+                    type="text"
+                    value={vServings}
+                    onChange={(e) => setVServings(e.target.value)}
+                    placeholder="Ej: 8 porciones"
+                    className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-semibold"
                   />
-                  <span className="text-[10px] text-stone-500">
-                    1 = Mediana, 0.125 = 1/8, 1.65 = Grande
-                  </span>
                 </div>
               </div>
 
@@ -1408,25 +1455,28 @@ export const CakesAndPricingView: React.FC = () => {
                   value={vName}
                   onChange={(e) => setVName(e.target.value)}
                   placeholder="Ej: Mediana 20cm"
-                  className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-sm"
+                  className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-sm font-bold"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    Porciones que rinde
+                  <label className="block text-xs font-bold text-pink-800 mb-1">
+                    Costo Base Ingredientes ({settings.currencySymbol})
                   </label>
                   <input
-                    type="text"
-                    value={vServings}
-                    onChange={(e) => setVServings(e.target.value)}
-                    className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={vDirectCost}
+                    onChange={(e) => setVDirectCost(e.target.value)}
+                    placeholder="Ej: 5500"
+                    className="w-full px-3 py-2 bg-pink-50/50 border border-pink-300 rounded-xl text-sm font-black text-stone-900"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-stone-700 mb-1">
-                    % Gas / Luz
+                    % Gas / Luz / Horno
                   </label>
                   <input
                     type="number"
@@ -1533,6 +1583,130 @@ export const CakesAndPricingView: React.FC = () => {
         </div>
       )}
 
+      {/* Modal: Edit / Add Specialty ("Con Algo Especial") */}
+      {isSpecialtyModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[88vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <h2 className="text-base font-extrabold text-stone-900">
+                {editingSpecialtyId
+                  ? 'Editar Versión Especial'
+                  : `Nueva Versión Especial de ${activeRecipe.name}`}
+              </h2>
+              <button
+                onClick={() => setIsSpecialtyModalOpen(false)}
+                className="p-1.5 text-stone-400 hover:text-stone-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSpecialty} className="space-y-3.5 mt-4">
+              <div className="flex gap-2.5">
+                <div className="w-20">
+                  <label className="block text-xs font-bold text-stone-700 mb-1">Icono</label>
+                  <input
+                    type="text"
+                    value={specEmoji}
+                    onChange={(e) => setSpecEmoji(e.target.value)}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-xl text-center text-lg"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-stone-700 mb-1">
+                    Nombre de la Versión Especial *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={specName}
+                    onChange={(e) => setSpecName(e.target.value)}
+                    placeholder="Ej: Con Dulce de Leche / Con Frutilla"
+                    className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-sm font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  Detalle de qué lleva extra (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={specDesc}
+                  onChange={(e) => setSpecDesc(e.target.value)}
+                  placeholder="Ej: Relleno extra de dulce de leche o frutillas frescas"
+                  className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3.5 space-y-3">
+                <div>
+                  <label className="block text-xs font-extrabold text-amber-950 mb-1">
+                    Costo Extra en Torta Mediana ({settings.currencySymbol})
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={specExtraBaseCost}
+                    onChange={(e) => setSpecExtraBaseCost(e.target.value)}
+                    placeholder="Ej: 1500"
+                    className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-sm font-black"
+                  />
+                  <span className="text-[10px] text-amber-900 mt-1 block">
+                    Se adapta proporcionalmente a los demás tamaños (Vaso, Chica, Grande).
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">
+                    O fijar Costo Extra exacto solo para {activeVariant.name} (opcional):
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={specCustomVariantExtraCost}
+                    onChange={(e) => setSpecCustomVariantExtraCost(e.target.value)}
+                    placeholder="Dejar vacío para cálculo proporcional automático"
+                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                {editingSpecialtyId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = specialties.find((s) => s.id === editingSpecialtyId);
+                      if (target) handleDeleteSpecialtyConfirm(target);
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" /> Eliminar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsSpecialtyModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-stone-300 text-stone-700 font-semibold text-sm cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm shadow-md cursor-pointer"
+                >
+                  Guardar Versión
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Modal: New / Edit Recipe */}
       {isNewRecipeModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -1583,19 +1757,6 @@ export const CakesAndPricingView: React.FC = () => {
                   value={newRecipeDescription}
                   onChange={(e) => setNewRecipeDescription(e.target.value)}
                   placeholder="Ej: Bizcochuelo húmedo con crema..."
-                  className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-stone-700 mb-1">
-                  Rendimiento de la Receta Base
-                </label>
-                <input
-                  type="text"
-                  value={newRecipeYieldLabel}
-                  onChange={(e) => setNewRecipeYieldLabel(e.target.value)}
-                  placeholder="Ej: Receta Base = 1 Torta Mediana (8 porciones)"
                   className="w-full px-3.5 py-2 border border-stone-300 rounded-xl text-xs"
                 />
               </div>

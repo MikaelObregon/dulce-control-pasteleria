@@ -2,28 +2,41 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Boxes,
+  CakeSlice,
   Check,
   CheckCircle2,
-  ChefHat,
   Copy,
   Minus,
   Package,
   Plus,
   Search,
+  Star,
   Wheat,
   X,
   XCircle,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
-import { calculateSupplyUnitCost } from '../../services/calculations';
-import { Supply } from '../../types/domain';
+import {
+  calculateSupplyUnitCost,
+  calculateVariantCostBreakdown,
+} from '../../services/calculations';
+import { Recipe, Supply } from '../../types/domain';
 import { SuppliesView } from '../supplies/SuppliesView';
 
 export const SuppliesAndShoppingView: React.FC = () => {
-  const { recipes, supplies, settings, formatMoney, adjustSupplyStock, upsertSupply } =
-    useStore();
+  const {
+    recipes,
+    supplies,
+    settings,
+    formatMoney,
+    adjustSupplyStock,
+    adjustVariantReadyStock,
+    upsertSupply,
+  } = useStore();
 
   const [subTab, setSubTab] = useState<'stock' | 'precios'>('stock');
+  // Selector de Torta para ver el Stock separado por cada torta ('all' o recipe.id)
+  const [selectedCakeFilter, setSelectedCakeFilter] = useState<string>('all');
   const [stockFilter, setStockFilter] = useState<
     'todos' | 'alertas' | 'ingrediente' | 'envase'
   >('todos');
@@ -34,16 +47,40 @@ export const SuppliesAndShoppingView: React.FC = () => {
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [stockInputVal, setStockInputVal] = useState<string>('');
   const [minAlertInputVal, setMinAlertInputVal] = useState<string>('');
+  const [assignedCakeVal, setAssignedCakeVal] = useState<string>('all');
   const [inputMode, setInputMode] = useState<'base' | 'packs'>('base');
 
-  // 1. Global Stock Indicators
+  // Helper: check if a supply belongs to a specific cake
+  const doesSupplyBelongToRecipe = (supply: Supply, recipe: Recipe): boolean => {
+    if (supply.assignedRecipeId && supply.assignedRecipeId !== 'all') {
+      return supply.assignedRecipeId === recipe.id;
+    }
+    const inBase = recipe.baseIngredients.some((i) => i.supplyId === supply.id);
+    const inPkg = recipe.variants.some(
+      (v) =>
+        v.packagingItems.some((p) => p.supplyId === supply.id) ||
+        (v.customIngredients &&
+          v.customIngredients.some((ci) => ci.supplyId === supply.id))
+    );
+    return inBase || inPkg;
+  };
+
+  // Supplies filtered by the active Cake tab first
+  const cakeScopedSupplies = useMemo(() => {
+    if (selectedCakeFilter === 'all') return supplies;
+    const targetRecipe = recipes.find((r) => r.id === selectedCakeFilter);
+    if (!targetRecipe) return supplies;
+    return supplies.filter((s) => doesSupplyBelongToRecipe(s, targetRecipe));
+  }, [supplies, recipes, selectedCakeFilter]);
+
+  // 1. Stock Indicators for the selected Cake (or All)
   const stockMetrics = useMemo(() => {
     let totalInventoryValue = 0;
     let optimalCount = 0;
     let lowCount = 0;
     let outOfStockCount = 0;
 
-    for (const s of supplies) {
+    for (const s of cakeScopedSupplies) {
       const unitCost = calculateSupplyUnitCost(s);
       totalInventoryValue += Math.max(0, s.stockQuantity) * unitCost;
 
@@ -63,80 +100,49 @@ export const SuppliesAndShoppingView: React.FC = () => {
       outOfStockCount,
       alertsTotal: lowCount + outOfStockCount,
     };
-  }, [supplies]);
+  }, [cakeScopedSupplies]);
 
-  // 2. Recipe Production Capacity Indicator: How many of each cake/size can I make right now with current stock?
-  const recipeCapacityIndicators = useMemo(() => {
-    const suppliesMap = new Map<string, Supply>(supplies.map((s) => [s.id, s]));
+  // 2. Ready Cakes Stock Summary (Tortas / Vasos ya listos en heladera por Torta y Especialidad)
+  const readyCakesSummary = useMemo(() => {
+    let totalReadyUnits = 0;
+    let totalReadySaleValue = 0;
 
-    return recipes.map((recipe) => {
-      const variantCapacities = recipe.variants.map((variant) => {
-        const ingList =
-          variant.customIngredients && variant.customIngredients.length > 0
-            ? variant.customIngredients
-            : recipe.baseIngredients.map((ing) => ({
-                supplyId: ing.supplyId,
-                quantity: ing.quantity * variant.scaleFactor,
-              }));
+    const targetRecipes =
+      selectedCakeFilter === 'all'
+        ? recipes
+        : recipes.filter((r) => r.id === selectedCakeFilter);
 
-        let maxMakeable = Infinity;
-        let limitingSupplyName = '';
-        const missingSupplies: string[] = [];
-
-        // Check ingredients
-        for (const ing of ingList) {
-          if (ing.quantity <= 0) continue;
-          const sup = suppliesMap.get(ing.supplyId);
-          if (!sup) continue;
-          const possible = Math.floor(sup.stockQuantity / ing.quantity);
-          if (possible <= 0) {
-            missingSupplies.push(sup.name);
-          }
-          if (possible < maxMakeable) {
-            maxMakeable = possible;
-            limitingSupplyName = sup.name;
-          }
-        }
-
-        // Check packaging
-        for (const pkg of variant.packagingItems) {
-          if (pkg.quantity <= 0) continue;
-          const sup = suppliesMap.get(pkg.supplyId);
-          if (!sup) continue;
-          const possible = Math.floor(sup.stockQuantity / pkg.quantity);
-          if (possible <= 0) {
-            missingSupplies.push(sup.name);
-          }
-          if (possible < maxMakeable) {
-            maxMakeable = possible;
-            limitingSupplyName = sup.name;
+    for (const r of targetRecipes) {
+      const specs =
+        r.specialties && r.specialties.length > 0
+          ? r.specialties
+          : [
+              {
+                id: 'default',
+                name: 'Clásica (Normal)',
+                emoji: '✨',
+                isDefault: true,
+                extraBaseCost: 0,
+              },
+            ];
+      for (const v of r.variants) {
+        for (const sp of specs) {
+          const qty = v.readyStockBySpecialty?.[sp.id] || 0;
+          if (qty > 0) {
+            totalReadyUnits += qty;
+            const b = calculateVariantCostBreakdown(r, v, supplies, sp);
+            totalReadySaleValue += qty * b.effectiveSalePrice;
           }
         }
+      }
+    }
 
-        const safeMax = Number.isFinite(maxMakeable) ? Math.max(0, maxMakeable) : 0;
-
-        return {
-          variantId: variant.id,
-          variantName: variant.name,
-          format: variant.format,
-          maxMakeable: safeMax,
-          limitingSupplyName,
-          missingSupplies: Array.from(new Set(missingSupplies)),
-        };
-      });
-
-      return {
-        recipeId: recipe.id,
-        recipeName: recipe.name,
-        emoji: recipe.emoji,
-        variantCapacities,
-      };
-    });
-  }, [recipes, supplies]);
+    return { totalReadyUnits, totalReadySaleValue, targetRecipes };
+  }, [recipes, supplies, selectedCakeFilter]);
 
   // Filtered supplies for stock cards
   const filteredSupplies = useMemo(() => {
-    return supplies.filter((s) => {
+    return cakeScopedSupplies.filter((s) => {
       if (stockFilter === 'ingrediente' && s.category !== 'ingrediente') return false;
       if (stockFilter === 'envase' && s.category !== 'envase') return false;
       if (stockFilter === 'alertas') {
@@ -150,13 +156,14 @@ export const SuppliesAndShoppingView: React.FC = () => {
       }
       return true;
     });
-  }, [supplies, stockFilter, search]);
+  }, [cakeScopedSupplies, stockFilter, search]);
 
   const openStockEditor = (supply: Supply) => {
     setEditingStockId(supply.id);
     setInputMode('base');
     setStockInputVal(String(supply.stockQuantity));
     setMinAlertInputVal(String(supply.minStockAlert));
+    setAssignedCakeVal(supply.assignedRecipeId || 'all');
   };
 
   const handleSaveManualStock = (supply: Supply) => {
@@ -171,6 +178,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
       id: supply.id,
       name: supply.name,
       category: supply.category,
+      assignedRecipeId: assignedCakeVal === 'all' ? undefined : assignedCakeVal,
       purchasePrice: supply.purchasePrice,
       purchaseAmount: supply.purchaseAmount,
       purchaseUnit: supply.purchaseUnit,
@@ -181,17 +189,22 @@ export const SuppliesAndShoppingView: React.FC = () => {
   };
 
   const handleCopyLowStockList = () => {
-    const alertItems = supplies.filter(
+    const activeCakeObj = recipes.find((r) => r.id === selectedCakeFilter);
+    const titleScope = activeCakeObj
+      ? `${activeCakeObj.emoji} ${activeCakeObj.name.toUpperCase()}`
+      : settings.businessName.toUpperCase();
+
+    const alertItems = cakeScopedSupplies.filter(
       (s) =>
         s.stockQuantity <= 0 ||
         (s.minStockAlert > 0 && s.stockQuantity <= s.minStockAlert)
     );
     const lines = [
-      `🛒 *LISTA DE REPOSICIÓN DE STOCK — ${settings.businessName.toUpperCase()}*`,
+      `🛒 *LISTA DE COMPRAS (${titleScope})*`,
       '',
       ...alertItems.map((s) => {
         const statusLabel = s.stockQuantity <= 0 ? '🔴 AGOTADO' : '🟡 QUEDA POCO';
-        return `• ${statusLabel}: *${s.name}* (Quedan ${s.stockQuantity} ${s.baseUnit} / Mínimo ideal: ${s.minStockAlert} ${s.baseUnit})`;
+        return `• ${statusLabel}: *${s.name}* (Tienes: ${s.stockQuantity} ${s.baseUnit} / Mínimo: ${s.minStockAlert} ${s.baseUnit})`;
       }),
     ];
     navigator.clipboard?.writeText(lines.join('\n'));
@@ -199,24 +212,21 @@ export const SuppliesAndShoppingView: React.FC = () => {
     setTimeout(() => setCopiedLowStock(false), 3000);
   };
 
-  const getSupplyRecipesBadges = (supplyId: string) => {
+  const getSupplyCakesBadges = (supply: Supply) => {
+    if (supply.assignedRecipeId && supply.assignedRecipeId !== 'all') {
+      const target = recipes.find((r) => r.id === supply.assignedRecipeId);
+      return target ? [`${target.emoji} Exclusivo ${target.name}`] : [];
+    }
     return recipes
-      .filter(
-        (r) =>
-          r.baseIngredients.some((i) => i.supplyId === supplyId) ||
-          r.variants.some(
-            (v) =>
-              v.packagingItems.some((p) => p.supplyId === supplyId) ||
-              (v.customIngredients &&
-                v.customIngredients.some((ci) => ci.supplyId === supplyId))
-          )
-      )
+      .filter((r) => doesSupplyBelongToRecipe(supply, r))
       .map((r) => `${r.emoji} ${r.name}`);
   };
 
+  const selectedCakeObj = recipes.find((r) => r.id === selectedCakeFilter);
+
   return (
     <div className="space-y-4 pb-12">
-      {/* Top Switcher: Mi Stock y Alacena vs Precios de Insumos */}
+      {/* Top Switcher: Mi Stock por Torta vs Precios de Paquetes */}
       <div className="grid grid-cols-2 gap-2 p-1.5 bg-stone-200/80 rounded-2xl">
         <button
           onClick={() => setSubTab('stock')}
@@ -227,7 +237,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
           }`}
         >
           <Boxes className="w-4 h-4 text-amber-700" />
-          Mi Stock y Alacena ({supplies.length})
+          Stock por Torta y Alacena
         </button>
         <button
           onClick={() => setSubTab('precios')}
@@ -246,24 +256,241 @@ export const SuppliesAndShoppingView: React.FC = () => {
         <SuppliesView />
       ) : (
         <div className="space-y-4">
-          {/* 1. TABLERO DE INDICADORES DE STOCK */}
+          {/* SELECTOR DE TORTA PARA SEPARAR EL STOCK DE CADA TORTA */}
+          <div className="bg-white rounded-3xl p-3.5 border border-stone-200/90 shadow-xs space-y-2.5">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-stone-500 block px-1">
+              🍰 Elige una Torta para ver su Stock Separado:
+            </span>
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+              <button
+                type="button"
+                onClick={() => setSelectedCakeFilter('all')}
+                className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold shrink-0 transition cursor-pointer flex items-center gap-1.5 ${
+                  selectedCakeFilter === 'all'
+                    ? 'bg-stone-900 text-white shadow-sm'
+                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                }`}
+              >
+                📋 Todas las Tortas ({supplies.length})
+              </button>
+
+              {recipes.map((r) => {
+                const isSelected = selectedCakeFilter === r.id;
+                const countForCake = supplies.filter((s) =>
+                  doesSupplyBelongToRecipe(s, r)
+                ).length;
+
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setSelectedCakeFilter(r.id)}
+                    className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold shrink-0 transition cursor-pointer flex items-center gap-1.5 border ${
+                      isSelected
+                        ? 'bg-pink-700 text-white border-pink-700 shadow-sm'
+                        : 'bg-[#FDFBF7] text-stone-800 border-stone-200 hover:border-pink-300'
+                    }`}
+                  >
+                    <span className="text-base">{r.emoji}</span>
+                    <span>{r.name}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                        isSelected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-stone-200/80 text-stone-600'
+                      }`}
+                    >
+                      {countForCake}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 1. STOCK DE TORTAS Y VASOS LISTOS EN HELADERA (SEPARADO POR TORTA Y VERSIÓN NORMAL/ESPECIAL) */}
+          <div className="bg-white rounded-3xl p-4 border border-stone-200/90 shadow-xs space-y-3.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-pink-50 text-pink-700">
+                  <CakeSlice className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-extrabold text-stone-900">
+                    🧊 Tortas y Porciones Listas en Heladera
+                    {selectedCakeObj ? ` — ${selectedCakeObj.name}` : ''}
+                  </h2>
+                  <p className="text-[11px] text-stone-500">
+                    Lleva el control separado de cuántas unidades tienes hechas hoy (Normal vs.
+                    Especial).
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-3 py-1.5 text-right">
+                <span className="text-[10px] font-bold uppercase text-emerald-800 block">
+                  Listas p/ vender: {readyCakesSummary.totalReadyUnits} u.
+                </span>
+                <span className="text-sm font-black text-emerald-900">
+                  Valor venta: {formatMoney(readyCakesSummary.totalReadySaleValue)}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {readyCakesSummary.targetRecipes.map((recipe) => {
+                const specs =
+                  recipe.specialties && recipe.specialties.length > 0
+                    ? recipe.specialties
+                    : [
+                        {
+                          id: 'default',
+                          name: 'Clásica (Normal)',
+                          emoji: '✨',
+                          isDefault: true,
+                          extraBaseCost: 0,
+                        },
+                      ];
+
+                return (
+                  <div
+                    key={recipe.id}
+                    className="rounded-2xl border border-stone-200/90 bg-[#FDFBF7] p-3.5 space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b border-stone-200/70 pb-2">
+                      <span className="text-sm font-extrabold text-stone-900 flex items-center gap-1.5">
+                        <span className="text-lg">{recipe.emoji}</span> {recipe.name}
+                      </span>
+                      <span className="text-[11px] font-bold text-pink-700 bg-pink-50 px-2.5 py-0.5 rounded-full">
+                        {specs.length} versión(es) · {recipe.variants.length} tamaños
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {specs.map((spec) => (
+                        <div
+                          key={spec.id}
+                          className="bg-white rounded-2xl p-3 border border-stone-200/80 space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-extrabold text-stone-800 flex items-center gap-1">
+                              <span>{spec.emoji}</span> {spec.name}
+                              {!spec.isDefault && (
+                                <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded-md ml-1">
+                                  <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-600" />
+                                  Especial
+                                </span>
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {recipe.variants.map((variant) => {
+                              const readyQty =
+                                variant.readyStockBySpecialty?.[spec.id] || 0;
+                              const b = calculateVariantCostBreakdown(
+                                recipe,
+                                variant,
+                                supplies,
+                                spec
+                              );
+
+                              return (
+                                <div
+                                  key={`${spec.id}-${variant.id}`}
+                                  className={`flex items-center justify-between gap-2 p-2 rounded-xl border ${
+                                    readyQty > 0
+                                      ? 'bg-emerald-50/70 border-emerald-300'
+                                      : 'bg-stone-50/70 border-stone-200/70'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-stone-900 truncate">
+                                      {variant.name}
+                                    </p>
+                                    <p className="text-[10px] text-stone-500">
+                                      Venta: <strong>{formatMoney(b.effectiveSalePrice)}</strong>
+                                    </p>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        adjustVariantReadyStock(
+                                          recipe.id,
+                                          variant.id,
+                                          spec.id,
+                                          readyQty - 1
+                                        )
+                                      }
+                                      className="w-7 h-7 rounded-lg bg-white border border-stone-300 hover:bg-stone-100 flex items-center justify-center text-stone-700 font-bold cursor-pointer"
+                                      title="Restar 1 unidad lista"
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <span
+                                      className={`min-w-[28px] text-center text-sm font-black ${
+                                        readyQty > 0 ? 'text-emerald-800' : 'text-stone-400'
+                                      }`}
+                                    >
+                                      {readyQty}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        adjustVariantReadyStock(
+                                          recipe.id,
+                                          variant.id,
+                                          spec.id,
+                                          readyQty + 1
+                                        )
+                                      }
+                                      className="w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center font-bold cursor-pointer"
+                                      title="Sumar 1 unidad lista"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. TABLERO DE INSUMOS Y ENVASES DE LA TORTA SELECCIONADA */}
           <div className="bg-gradient-to-br from-stone-900 via-stone-800 to-amber-950 rounded-3xl p-5 text-white shadow-lg space-y-4">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-300 px-3 py-1 rounded-full mb-1.5">
-                  <Boxes className="w-3.5 h-3.5" /> Control de Alacena e Indicadores
+                  <Boxes className="w-3.5 h-3.5" />{' '}
+                  {selectedCakeObj
+                    ? `Alacena Exclusiva: ${selectedCakeObj.name}`
+                    : 'Alacena General de Ingredientes y Envases'}
                 </span>
                 <h1 className="text-xl font-black tracking-tight">
-                  Tu Stock de Ingredientes y Envases
+                  {selectedCakeObj
+                    ? `${selectedCakeObj.emoji} Insumos de ${selectedCakeObj.name}`
+                    : 'Tu Stock de Ingredientes y Envases'}
                 </h1>
                 <p className="text-xs text-stone-300 mt-0.5">
-                  Suma o resta lo que tienes en casa y mira para cuántas tortas te alcanza hoy.
+                  {selectedCakeObj
+                    ? `Aquí ves únicamente los ingredientes y envases asignados a ${selectedCakeObj.name}.`
+                    : 'Suma o resta lo que tienes en casa o filtra arriba por cada torta.'}
                 </p>
               </div>
 
               <div className="bg-white/10 border border-white/15 rounded-2xl px-3.5 py-2 text-right">
                 <span className="text-[10px] uppercase tracking-wider text-amber-200 font-bold block">
-                  Dinero en Mercadería Guardada
+                  Dinero en Insumos{' '}
+                  {selectedCakeObj ? `(${selectedCakeObj.name})` : 'Guardados'}
                 </span>
                 <span className="text-lg font-black text-white">
                   {formatMoney(stockMetrics.totalInventoryValue)}
@@ -330,120 +557,12 @@ export const SuppliesAndShoppingView: React.FC = () => {
                 ) : (
                   <>
                     <Copy className="w-4 h-4 text-amber-700" />
-                    Copiar los {stockMetrics.alertsTotal} insumos bajos/agotados para ir a comprar
+                    Copiar los {stockMetrics.alertsTotal} insumos faltantes
+                    {selectedCakeObj ? ` de ${selectedCakeObj.name}` : ''} para ir a comprar
                   </>
                 )}
               </button>
             )}
-          </div>
-
-          {/* 2. INDICADOR DE CAPACIDAD POR RECETA: ¿CUÁNTAS TORTAS PUEDO HACER HOY CON MI STOCK? */}
-          <div className="bg-white rounded-3xl p-4 border border-stone-200/90 shadow-xs space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-2xl bg-pink-50 text-pink-700">
-                  <ChefHat className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-extrabold text-stone-900">
-                    ¿Cuántas Tortas puedes hacer hoy con tu Stock actual?
-                  </h2>
-                  <p className="text-[11px] text-stone-500">
-                    Calculado en vivo cruzando tu alacena contra las recetas y envases de cada
-                    tamaño
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {recipeCapacityIndicators.map((rc) => {
-                const medianaCap =
-                  rc.variantCapacities.find((v) => v.format === 'mediana') ||
-                  rc.variantCapacities[0];
-                const indCap = rc.variantCapacities.find(
-                  (v) => v.format === 'individual'
-                );
-                const grandeCap = rc.variantCapacities.find(
-                  (v) => v.format === 'grande'
-                );
-
-                const canMakeMediana = (medianaCap?.maxMakeable ?? 0) > 0;
-
-                return (
-                  <div
-                    key={rc.recipeId}
-                    className={`rounded-2xl p-3.5 border ${
-                      canMakeMediana
-                        ? 'bg-[#FDFBF7] border-stone-200/90'
-                        : 'bg-red-50/60 border-red-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-extrabold text-stone-900 flex items-center gap-1.5">
-                        <span className="text-base">{rc.emoji}</span> {rc.recipeName}
-                      </span>
-                      <span
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                          canMakeMediana
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
-                      >
-                        {canMakeMediana ? 'Disponible' : 'Falta Stock'}
-                      </span>
-                    </div>
-
-                    <div className="mt-2.5 space-y-1 text-xs">
-                      {medianaCap && (
-                        <div className="flex justify-between">
-                          <span className="text-stone-600">🎂 Medianas:</span>
-                          <strong
-                            className={
-                              medianaCap.maxMakeable > 0
-                                ? 'text-emerald-700 font-black'
-                                : 'text-red-600 font-black'
-                            }
-                          >
-                            {medianaCap.maxMakeable} u.
-                          </strong>
-                        </div>
-                      )}
-                      {grandeCap && (
-                        <div className="flex justify-between">
-                          <span className="text-stone-600">👑 Grandes:</span>
-                          <strong className="text-stone-900 font-bold">
-                            {grandeCap.maxMakeable} u.
-                          </strong>
-                        </div>
-                      )}
-                      {indCap && (
-                        <div className="flex justify-between">
-                          <span className="text-stone-600">🥤 Individuales:</span>
-                          <strong className="text-stone-900 font-bold">
-                            {indCap.maxMakeable} u.
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-
-                    {medianaCap && (
-                      <div className="mt-2 pt-2 border-t border-stone-200/70 text-[10px]">
-                        {medianaCap.missingSupplies.length > 0 ? (
-                          <span className="text-red-700 font-bold block truncate">
-                            ⚠️ Falta: {medianaCap.missingSupplies.join(', ')}
-                          </span>
-                        ) : (
-                          <span className="text-stone-500 block truncate">
-                            Límite: <strong>{medianaCap.limitingSupplyName}</strong>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
           </div>
 
           {/* 3. BUSCADOR Y FILTROS DE STOCK */}
@@ -476,7 +595,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
                     : 'bg-white text-stone-600 border border-stone-200'
                 }`}
               >
-                Todos ({supplies.length})
+                Todos ({cakeScopedSupplies.length})
               </button>
               <button
                 onClick={() => setStockFilter('alertas')}
@@ -499,7 +618,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
               >
                 <Wheat className="w-3.5 h-3.5" />
                 Ingredientes (
-                {supplies.filter((s) => s.category === 'ingrediente').length})
+                {cakeScopedSupplies.filter((s) => s.category === 'ingrediente').length})
               </button>
               <button
                 onClick={() => setStockFilter('envase')}
@@ -510,7 +629,8 @@ export const SuppliesAndShoppingView: React.FC = () => {
                 }`}
               >
                 <Package className="w-3.5 h-3.5" />
-                Envases ({supplies.filter((s) => s.category === 'envase').length})
+                Envases (
+                {cakeScopedSupplies.filter((s) => s.category === 'envase').length})
               </button>
             </div>
           </div>
@@ -541,7 +661,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
                 Math.round((supply.stockQuantity / targetReference) * 100)
               );
 
-              const usedInRecipes = getSupplyRecipesBadges(supply.id);
+              const cakeBadges = getSupplyCakesBadges(supply);
               const isEditingThis = editingStockId === supply.id;
 
               return (
@@ -589,10 +709,10 @@ export const SuppliesAndShoppingView: React.FC = () => {
                         {supply.name}
                       </h3>
 
-                      {/* Recipes that use this supply */}
-                      {usedInRecipes.length > 0 && (
+                      {/* Tortas que usan este insumo */}
+                      {cakeBadges.length > 0 && (
                         <div className="flex items-center gap-1 flex-wrap mt-1">
-                          {usedInRecipes.map((badge) => (
+                          {cakeBadges.map((badge) => (
                             <span
                               key={badge}
                               className="text-[10px] font-semibold bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full"
@@ -659,7 +779,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
                     <div className="bg-amber-50/80 border border-amber-300 rounded-2xl p-3 space-y-2.5">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-extrabold text-amber-950">
-                          Ajustar cantidad exacta que tienes:
+                          Ajustar Stock y Torta asignada:
                         </span>
                         <div className="inline-flex bg-white p-0.5 rounded-lg border border-amber-300 text-[11px] font-bold">
                           <button
@@ -736,6 +856,24 @@ export const SuppliesAndShoppingView: React.FC = () => {
                         </div>
                       </div>
 
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-600 mb-1">
+                          ¿A qué torta pertenece este insumo?
+                        </label>
+                        <select
+                          value={assignedCakeVal}
+                          onChange={(e) => setAssignedCakeVal(e.target.value)}
+                          className="w-full px-3 py-1.5 bg-white border border-stone-300 rounded-xl text-xs font-bold"
+                        >
+                          <option value="all">📋 Uso General / Compartido entre tortas</option>
+                          {recipes.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.emoji} Exclusivo para {r.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -792,7 +930,7 @@ export const SuppliesAndShoppingView: React.FC = () => {
                         onClick={() => openStockEditor(supply)}
                         className="text-xs font-extrabold text-amber-800 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-xl cursor-pointer"
                       >
-                        Escribir cantidad exacta
+                        Editar Stock / Asignar Torta
                       </button>
                     </div>
                   )}

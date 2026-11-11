@@ -127,6 +127,7 @@ export const TodayAndCashView: React.FC = () => {
     Array<{
       recipeId: string;
       variantId: string;
+      specialtyId?: string;
       quantity: number;
       customUnitPrice: string;
     }>
@@ -207,12 +208,15 @@ export const TodayAndCashView: React.FC = () => {
     setNotes('');
     setInitialDeposit('');
     setDepositMethod('transferencia');
+    const firstSpec =
+      firstRec?.specialties?.find((s) => s.isDefault) || firstRec?.specialties?.[0];
     setDraftItems(
       firstRec && firstVar
         ? [
             {
               recipeId: firstRec.id,
               variantId: firstVar.id,
+              specialtyId: firstSpec?.id,
               quantity: 1,
               customUnitPrice: '',
             },
@@ -234,6 +238,7 @@ export const TodayAndCashView: React.FC = () => {
       order.items.map((item) => ({
         recipeId: item.recipeId,
         variantId: item.variantId,
+        specialtyId: item.specialtyId,
         quantity: item.quantity,
         customUnitPrice: String(item.unitPriceSnapshot),
       }))
@@ -249,8 +254,13 @@ export const TodayAndCashView: React.FC = () => {
     draftItems.forEach((line, idx) => {
       const rec = recipes.find((r) => r.id === line.recipeId);
       const vari = rec?.variants.find((v) => v.id === line.variantId);
+      const spec =
+        rec?.specialties?.find((s) => s.id === line.specialtyId) ||
+        rec?.specialties?.find((s) => s.isDefault) ||
+        rec?.specialties?.[0];
+
       if (rec && vari) {
-        const b = calculateVariantCostBreakdown(rec, vari, supplies);
+        const b = calculateVariantCostBreakdown(rec, vari, supplies, spec);
         const qty = Math.max(1, Number(line.quantity) || 1);
         const customPriceVal =
           line.customUnitPrice.trim() !== '' && Number(line.customUnitPrice) > 0
@@ -259,12 +269,15 @@ export const TodayAndCashView: React.FC = () => {
 
         totalCost += b.totalProductionCost * qty;
         totalPrice += customPriceVal * qty;
+        const specSuffix = spec && !spec.isDefault ? ` · ${spec.name}` : '';
         resolvedItems.push({
           id: `item-${Date.now()}-${idx}`,
           recipeId: rec.id,
           recipeName: rec.name,
           variantId: vari.id,
-          variantName: vari.name,
+          variantName: `${vari.name}${specSuffix}`,
+          specialtyId: spec?.id,
+          specialtyName: spec?.name,
           quantity: qty,
           unitCostSnapshot: b.totalProductionCost,
           unitPriceSnapshot: customPriceVal,
@@ -1251,9 +1264,18 @@ export const TodayAndCashView: React.FC = () => {
                   const selectedVar =
                     selectedRec?.variants.find((v) => v.id === item.variantId) ||
                     selectedRec?.variants[0];
+                  const selectedSpec =
+                    selectedRec?.specialties?.find((s) => s.id === item.specialtyId) ||
+                    selectedRec?.specialties?.find((s) => s.isDefault) ||
+                    selectedRec?.specialties?.[0];
                   const b =
                     selectedRec && selectedVar
-                      ? calculateVariantCostBreakdown(selectedRec, selectedVar, supplies)
+                      ? calculateVariantCostBreakdown(
+                          selectedRec,
+                          selectedVar,
+                          supplies,
+                          selectedSpec
+                        )
                       : null;
 
                   return (
@@ -1266,11 +1288,15 @@ export const TodayAndCashView: React.FC = () => {
                           value={item.recipeId}
                           onChange={(e) => {
                             const newRec = recipes.find((r) => r.id === e.target.value);
+                            const defSpec =
+                              newRec?.specialties?.find((s) => s.isDefault) ||
+                              newRec?.specialties?.[0];
                             const next = [...draftItems];
                             next[idx] = {
                               ...next[idx],
                               recipeId: e.target.value,
                               variantId: newRec?.variants[0]?.id || '',
+                              specialtyId: defSpec?.id,
                               customUnitPrice: '',
                             };
                             setDraftItems(next);
@@ -1296,6 +1322,33 @@ export const TodayAndCashView: React.FC = () => {
                           </button>
                         )}
                       </div>
+
+                      {selectedRec?.specialties && selectedRec.specialties.length > 0 && (
+                        <div>
+                          <span className="text-[10px] font-bold text-amber-900 block">
+                            Versión (Normal o Especial)
+                          </span>
+                          <select
+                            value={selectedSpec?.id || ''}
+                            onChange={(e) => {
+                              const next = [...draftItems];
+                              next[idx] = {
+                                ...next[idx],
+                                specialtyId: e.target.value,
+                                customUnitPrice: '',
+                              };
+                              setDraftItems(next);
+                            }}
+                            className="w-full bg-amber-50/70 border border-amber-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-stone-900"
+                          >
+                            {selectedRec.specialties.map((sp) => (
+                              <option key={sp.id} value={sp.id}>
+                                {sp.emoji} {sp.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-2 gap-2">
                         <div>

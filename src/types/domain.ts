@@ -8,12 +8,14 @@ export interface Supply {
   id: string;
   name: string;
   category: SupplyCategory;
+  /** ID de la torta a la que pertenece este insumo ('all' o undefined = uso general, o recipeId específico) */
+  assignedRecipeId?: string;
   /** Precio total pagado por el paquete/envase comprado */
   purchasePrice: number;
   /** Cantidad que trae el paquete en la unidad de compra (ej: 1 kg, 395 g, 12 u) */
   purchaseAmount: number;
   purchaseUnit: PurchaseUnit;
-  /** Unidad base normalizada para las recetas ('g', 'ml' o 'u') */
+  /** Unidad base normalizada para las recetas ('g', 'ml' o u') */
   baseUnit: BaseUnit;
   /** Cantidad total equivalente en unidad base (ej: 1 kg -> 1000 g) */
   baseTotalQuantity: number;
@@ -39,16 +41,36 @@ export interface RecipePackagingLine {
   quantity: number;
 }
 
+export interface RecipeSpecialty {
+  id: string;
+  name: string;
+  emoji: string;
+  description?: string;
+  /** Si es la versión normal/clásica base (sin recargo extra) */
+  isDefault?: boolean;
+  /** Costo extra base de ingredientes especiales (se escala según el tamaño o se define por variante) */
+  extraBaseCost: number;
+  /** Precios de venta manuales guardados por tamaño (variantId -> precio final) */
+  manualPricesByVariant?: Record<string, number>;
+  /** Costo extra personalizado por tamaño (variantId -> costo extra) */
+  extraCostByVariant?: Record<string, number>;
+}
+
 export interface RecipeVariant {
   id: string;
   name: string;
   format: SizeFormat;
   servingsLabel: string;
   /**
-   * Factor multiplicador sobre la receta base de ingredientes.
+   * Factor multiplicador sobre el costo base de la torta.
    * Ej: Mediana = 1.0, Chica = 0.6, Grande = 1.6, Porción = 0.125, Individual = 0.15
    */
   scaleFactor: number;
+  /**
+   * Costo directo de elaboración/ingredientes para este tamaño si el usuario lo edita manualmente
+   * sin usar la sección de recetas.
+   */
+  directIngredientsCost?: number;
   /**
    * Si el usuario desea definir cantidades personalizadas exactas para este tamaño
    * en lugar de usar scaleFactor sobre la receta base.
@@ -62,6 +84,8 @@ export interface RecipeVariant {
   defaultMarkupPercent: number;
   /** Precio de venta final fijado manualmente (opcional) */
   manualSalePrice?: number;
+  /** Stock de unidades listas para vender de este tamaño (por especialidad: specialtyId -> cantidad) */
+  readyStockBySpecialty?: Record<string, number>;
 }
 
 export interface Recipe {
@@ -73,6 +97,8 @@ export interface Recipe {
   baseYieldLabel: string;
   baseIngredients: RecipeIngredientLine[];
   variants: RecipeVariant[];
+  /** Variantes de sabor / con algo especial para esta torta (Normal vs Especiales) */
+  specialties?: RecipeSpecialty[];
 }
 
 export type PaymentMethod = 'efectivo' | 'transferencia' | 'mercado_pago' | 'otro';
@@ -91,6 +117,8 @@ export interface OrderItem {
   recipeName: string;
   variantId: string;
   variantName: string;
+  specialtyId?: string;
+  specialtyName?: string;
   quantity: number;
   /** Costo total unitario congelado al momento de crear el pedido */
   unitCostSnapshot: number;

@@ -1,6 +1,78 @@
-import { AppSettings, CashMovement, Order, Recipe, Supply } from '../types/domain';
+import {
+  AppSettings,
+  CashMovement,
+  Order,
+  Recipe,
+  RecipeSpecialty,
+  Supply,
+} from '../types/domain';
 
 const nowIso = new Date().toISOString();
+
+export const DEFAULT_SPECIALTIES_BY_RECIPE: Record<string, RecipeSpecialty[]> = {
+  'recipe-tres-leches': [
+    {
+      id: 'tl-spec-clasica',
+      name: 'Clásica (Normal)',
+      emoji: '✨',
+      description: 'Tres leches tradicional con merengue y canela',
+      isDefault: true,
+      extraBaseCost: 0,
+    },
+    {
+      id: 'tl-spec-ddl',
+      name: 'Con Dulce de Leche',
+      emoji: '🍯',
+      description: 'Con relleno o topping especial de dulce de leche repostero',
+      isDefault: false,
+      extraBaseCost: 1400,
+    },
+    {
+      id: 'tl-spec-fruta',
+      name: 'Con Frutilla / Durazno',
+      emoji: '🍓',
+      description: 'Con capa de fruta natural o duraznos en almíbar',
+      isDefault: false,
+      extraBaseCost: 1800,
+    },
+  ],
+  'recipe-marquesa': [
+    {
+      id: 'mq-spec-clasica',
+      name: 'Clásica (Normal)',
+      emoji: '✨',
+      description: 'Marquesa tradicional de chocolate semiamargo',
+      isDefault: true,
+      extraBaseCost: 0,
+    },
+    {
+      id: 'mq-spec-oreo',
+      name: 'Especial c/ Oreo o Nutella',
+      emoji: '🍪',
+      description: 'Coronada con galletas Oreo / crema de avellanas',
+      isDefault: false,
+      extraBaseCost: 1600,
+    },
+  ],
+  'recipe-torta-pina': [
+    {
+      id: 'tp-spec-clasica',
+      name: 'Clásica (Normal)',
+      emoji: '✨',
+      description: 'Corona acaramelada tradicional de piña y cerezas',
+      isDefault: true,
+      extraBaseCost: 0,
+    },
+    {
+      id: 'tp-spec-nueces',
+      name: 'Especial Extra Cerezas y Nueces',
+      emoji: '🍒',
+      description: 'Con doble cereza al marrasquino y nueces picadas',
+      isDefault: false,
+      extraBaseCost: 1700,
+    },
+  ],
+};
 
 export const INITIAL_SETTINGS: AppSettings = {
   businessName: 'DulceControl Pastelería',
@@ -301,6 +373,7 @@ export const INITIAL_RECIPES: Recipe[] = [
     emoji: '🥛',
     accentColor: 'amber',
     baseYieldLabel: 'Receta Base = 1 Torta Mediana (20cm / 8 porciones)',
+    specialties: DEFAULT_SPECIALTIES_BY_RECIPE['recipe-tres-leches'],
     baseIngredients: [
       { supplyId: 'sup-harina', quantity: 200, notes: 'Bizcocho' },
       { supplyId: 'sup-azucar', quantity: 220, notes: 'Bizcocho + Merengue' },
@@ -387,6 +460,7 @@ export const INITIAL_RECIPES: Recipe[] = [
     emoji: '🍫',
     accentColor: 'rose',
     baseYieldLabel: 'Receta Base = 1 Marquesa Mediana (20cm / 8 porciones)',
+    specialties: DEFAULT_SPECIALTIES_BY_RECIPE['recipe-marquesa'],
     baseIngredients: [
       { supplyId: 'sup-galletas-maria', quantity: 400, notes: '2 paquetes' },
       { supplyId: 'sup-chocolate', quantity: 250, notes: 'Chocolate derretido' },
@@ -473,6 +547,7 @@ export const INITIAL_RECIPES: Recipe[] = [
     emoji: '🍍',
     accentColor: 'yellow',
     baseYieldLabel: 'Receta Base = 1 Torta Mediana (20cm / 8-10 porciones)',
+    specialties: DEFAULT_SPECIALTIES_BY_RECIPE['recipe-torta-pina'],
     baseIngredients: [
       { supplyId: 'sup-pina-lata', quantity: 820, notes: '1 lata con su almíbar' },
       { supplyId: 'sup-harina', quantity: 300, notes: 'Tamizada' },

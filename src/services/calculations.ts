@@ -5,6 +5,7 @@ import {
   PurchaseUnit,
   Recipe,
   RecipeIngredientLine,
+  RecipeSpecialty,
   RecipeVariant,
   Supply,
 } from '../types/domain';
@@ -63,9 +64,13 @@ export interface VariantCostBreakdown {
   recipeName: string;
   variantId: string;
   variantName: string;
+  specialtyId?: string;
+  specialtyName?: string;
   format: RecipeVariant['format'];
   ingredientLines: IngredientCostLine[];
   packagingLines: PackagingCostLine[];
+  baseIngredientsCost: number;
+  specialtyExtraCost: number;
   ingredientsCost: number;
   utilityPercent: number;
   utilityCost: number;
@@ -94,7 +99,8 @@ export function roundCommercialPrice(price: number): number {
 export function calculateVariantCostBreakdown(
   recipe: Recipe,
   variant: RecipeVariant,
-  supplies: Supply[]
+  supplies: Supply[],
+  specialty?: RecipeSpecialty
 ): VariantCostBreakdown {
   const suppliesMap = new Map<string, Supply>(supplies.map((s) => [s.id, s]));
 
@@ -153,7 +159,30 @@ export function calculateVariantCostBreakdown(
     };
   });
 
-  const ingredientsCost = ingredientLines.reduce((acc, item) => acc + item.subtotalCost, 0);
+  const calculatedBaseIngredientsCost = ingredientLines.reduce(
+    (acc, item) => acc + item.subtotalCost,
+    0
+  );
+  const baseIngredientsCost =
+    variant.directIngredientsCost !== undefined && variant.directIngredientsCost >= 0
+      ? variant.directIngredientsCost
+      : calculatedBaseIngredientsCost;
+
+  let specialtyExtraCost = 0;
+  if (specialty && !specialty.isDefault) {
+    if (
+      specialty.extraCostByVariant &&
+      specialty.extraCostByVariant[variant.id] !== undefined
+    ) {
+      specialtyExtraCost = Math.max(0, specialty.extraCostByVariant[variant.id]);
+    } else {
+      specialtyExtraCost = Math.round(
+        Math.max(0, specialty.extraBaseCost || 0) * variant.scaleFactor
+      );
+    }
+  }
+
+  const ingredientsCost = baseIngredientsCost + specialtyExtraCost;
   const utilityCost = ingredientsCost * (Math.max(0, variant.utilityPercent) / 100);
   const packagingCost = packagingLines.reduce((acc, item) => acc + item.subtotalCost, 0);
   const totalProductionCost = ingredientsCost + utilityCost + packagingCost;
@@ -162,10 +191,19 @@ export function calculateVariantCostBreakdown(
     totalProductionCost * (1 + Math.max(0, variant.defaultMarkupPercent) / 100);
   const suggestedPriceRounded = roundCommercialPrice(suggestedPriceExact);
 
+  const specialtyManualPrice =
+    specialty && !specialty.isDefault
+      ? specialty.manualPricesByVariant?.[variant.id]
+      : undefined;
+
   const effectiveSalePrice =
-    variant.manualSalePrice && variant.manualSalePrice > 0
-      ? variant.manualSalePrice
-      : suggestedPriceRounded;
+    specialty && !specialty.isDefault
+      ? specialtyManualPrice && specialtyManualPrice > 0
+        ? specialtyManualPrice
+        : suggestedPriceRounded
+      : variant.manualSalePrice && variant.manualSalePrice > 0
+        ? variant.manualSalePrice
+        : suggestedPriceRounded;
 
   const netProfitPerUnit = effectiveSalePrice - totalProductionCost;
   const actualMarkupPercent =
@@ -178,9 +216,13 @@ export function calculateVariantCostBreakdown(
     recipeName: recipe.name,
     variantId: variant.id,
     variantName: variant.name,
+    specialtyId: specialty?.id,
+    specialtyName: specialty?.name,
     format: variant.format,
     ingredientLines,
     packagingLines,
+    baseIngredientsCost,
+    specialtyExtraCost,
     ingredientsCost,
     utilityPercent: variant.utilityPercent,
     utilityCost,
